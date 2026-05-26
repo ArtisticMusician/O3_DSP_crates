@@ -1,0 +1,99 @@
+#[derive(Clone, Debug)]
+pub struct VocalCompressor {
+    sample_rate: f32,
+    threshold_db: f32,
+    ratio_slope: f32,
+    makeup_gain_lin: f32,
+    knee_half_db: f32,
+    knee_inv: f32,
+    
+    rms_coef: f32,
+    rms_state: f32,
+    
+    attack_coef: f32,
+    release_coef: f32,
+    envelope: f32,
+}
+
+impl VocalCompressor {
+    pub fn new(sample_rate: f32) -> Self {
+        let mut comp = Self {
+            sample_rate,
+            threshold_db: -18.0,
+            ratio_slope: 0.5, 
+            makeup_gain_lin: 1.0,
+            knee_half_db: 2.5, 
+            knee_inv: 0.1,
+            rms_coef: 0.0,
+            rms_state: 0.0,
+            attack_coef: 0.0,
+            release_coef: 0.0,
+            envelope: 0.0,
+        };
+        
+        comp.set_rms_window_ms(30.0); 
+        comp.set_attack_ms(20.0);     
+        comp.set_release_ms(150.0);   
+        comp
+    }
+
+    pub fn set_threshold(&mut self, threshold_db: f32) {
+        self.threshold_db = threshold_db;
+    }
+
+    pub fn set_ratio(&mut self, ratio: f32) {
+        let ratio = ratio.max(1.0);
+        self.ratio_slope = 1.0 - (1.0 / ratio);
+    }
+
+    pub fn set_makeup_gain(&mut self, gain_db: f32) {
+        self.makeup_gain_lin = (gain_db * 0.11512925).exp();
+    }
+
+    pub fn set_knee_width(&mut self, knee_db: f32) {
+        let knee_width_db = knee_db.max(0.0);
+        if knee_width_db < 1e-5 {
+            self.knee_half_db = 0.0;
+            self.knee_inv = 0.0;
+        } else {
+            self.knee_half_db = knee_width_db * 0.5;
+            self.knee_inv = 1.0 / (2.0 * knee_width_db);
+        }
+    }
+
+    pub fn set_rms_window_ms(&mut self, ms: f32) {
+        let time_sec = (ms * 0.001).max(0.0001);
+        self.rms_coef = (-1.0 / (time_sec * self.sample_rate)).exp();
+    }
+
+    pub fn set_attack_ms(&mut self, ms: f32) {
+        self.attack_coef = (-1.0 / ((ms * 0.001).max(1e-5) * self.sample_rate)).exp();
+    }
+
+    pub fn set_release_ms(&mut self, ms: f32) {
+        self.release_coef = (-1.0 / ((ms * 0.001).max(1e-5) * self.sample_rate)).exp();
+    }
+
+    #[inline(always)]
+    pub fn process_sample(&mut self, left: f32, right: f32) -> (f32, f32) {
+        let input_power = (left * left + right * right) * 0.5;
+        
+        self.rms_state = self.rms_coef * self.rms_state + (1.0 - self.rms_coef) * input_power;
+        
+        let sidechain_lin = self.rms_state.sqrt().max(1e-12);
+        let sidechain_db = sidechain_lin.ln() * 8.6858896;
+
+        let over_threshold = sidechain_db - self.threshold_db;
+
+        let target_gr_db = if self.knee_half_db > 0.0 {
+            if over_threshold > self.knee_half_db {
+                over_threshold * self.ratio_slope
+            } else if over_threshold > -self.knee_half_db {
+                let x = over_threshold + self.knee_half_db;
+                self.ratio_slope * (x * x) * self.knee_inv
+            } else {
+                0.0
+            }
+        } else {
+            if over_threshold > 0.0 {
+                over_threshold * self
