@@ -1,5 +1,5 @@
 use std::ops::{Deref, DerefMut};
-use crate::frame_pool::FramePool;
+use crate::memory::frame_pool::FramePool;
 
 /// RAII handle that automatically returns the buffer block to the pool when dropped.
 pub struct FrameGuard<'a, T> {

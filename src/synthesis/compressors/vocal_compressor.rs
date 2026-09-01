@@ -96,4 +96,24 @@ impl VocalCompressor {
             }
         } else {
             if over_threshold > 0.0 {
-                over_threshold * self
+                over_threshold * self.ratio_slope
+            } else {
+                0.0
+            }
+        };
+
+        let coef = if target_gr_db > self.envelope {
+            self.attack_coef
+        } else {
+            self.release_coef
+        };
+
+        self.envelope = self.envelope * coef + target_gr_db * (1.0 - coef);
+
+        let gr_lin = (-self.envelope * 0.11512925).exp();
+
+        let total_gain = gr_lin * self.makeup_gain_lin;
+
+        (left * total_gain, right * total_gain)
+    }
+}

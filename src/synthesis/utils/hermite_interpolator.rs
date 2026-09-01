@@ -1,11 +1,11 @@
-/// Simple Resampler (interpolator) for basic polyphase or fractional delay.
+/// Simple fractional interpolator.
 /// Uses Hermite cubic interpolation for high quality.
 #[derive(Debug, Clone)]
-pub struct Resampler {
+pub struct HermiteInterpolator {
     buffer: [f32; 4],
 }
 
-impl Resampler {
+impl HermiteInterpolator {
     pub fn new() -> Self {
         Self {
             buffer: [0.0; 4],

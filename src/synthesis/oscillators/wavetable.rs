@@ -1,11 +1,10 @@
-// use crate::synthesis::utils::ParameterSmoother;
 use crate::synthesis::utils::ParameterSmoother;
 
 /// A simple wavetable oscillator supporting 1D linear interpolation.
-/// Assumes a pre-computed wavetable.
+/// Assumes a pre-computed wavetable that contains exactly 1 cycle.
 #[derive(Debug, Clone)]
 pub struct WavetableOscillator {
-    table: Vec<f32>,
+    table: &'static [f32],
     phase: f32,
     sample_rate: f32,
 
@@ -13,7 +12,7 @@ pub struct WavetableOscillator {
 }
 
 impl WavetableOscillator {
-    pub fn new(sample_rate: f32, table: Vec<f32>) -> Self {
+    pub fn new(sample_rate: f32, table: &'static [f32]) -> Self {
         Self {
             table,
             phase: 0.0,
@@ -22,8 +21,9 @@ impl WavetableOscillator {
         }
     }
 
-    /// Update the internal wavetable (e.g., when switching waveforms).
-    pub fn set_table(&mut self, table: Vec<f32>) {
+    /// Update the internal wavetable reference (e.g., when switching waveforms).
+    /// Does not allocate.
+    pub fn set_table(&mut self, table: &'static [f32]) {
         self.table = table;
     }
 
@@ -34,19 +34,29 @@ impl WavetableOscillator {
 
     #[inline(always)]
     pub fn process_sample(&mut self) -> f32 {
-        let freq = self.freq_smoother.process_sample();
+        let table_len = self.table.len();
+        if table_len == 0 {
+            return 0.0;
+        }
 
-        let table_len = self.table.len() as f32;
+        let freq = self.freq_smoother.process_sample();
         let phase_increment = freq / self.sample_rate;
 
+        let table_len_f = table_len as f32;
+
         // Calculate current index in the table
-        let index = self.phase * table_len;
+        let index = self.phase * table_len_f;
 
         // Linear interpolation
         let index_trunc = index as usize;
         let index_frac = index - index_trunc as f32;
 
-        let next_index = if index_trunc + 1 >= self.table.len() { 0 } else { index_trunc + 1 };
+        // Use mask if table length is power of 2, otherwise branch
+        let next_index = if table_len.is_power_of_two() {
+            (index_trunc + 1) & (table_len - 1)
+        } else {
+            if index_trunc + 1 >= table_len { 0 } else { index_trunc + 1 }
+        };
 
         let sample1 = self.table[index_trunc];
         let sample2 = self.table[next_index];

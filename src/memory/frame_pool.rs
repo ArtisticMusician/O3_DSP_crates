@@ -1,5 +1,5 @@
-use crate::frame_guard::FrameGuard;
-use crate::MpmcRingBuffer;
+use crate::memory::frame_guard::FrameGuard;
+use crate::common::spsc_queue::SpscRingBuffer;
 use std::alloc::{alloc, dealloc, Layout};
 use std::mem;
 use std::ptr;
@@ -11,7 +11,7 @@ pub struct FramePool<T> {
     total_elements: usize,
     frame_size: usize,
     layout: Layout, // Cached layout tracking to guarantee absolute compliance during Drop
-    pub(crate) available_indices: MpmcRingBuffer<usize>,
+    pub(crate) available_indices: SpscRingBuffer<usize>,
 }
 
 unsafe impl<T: Send> Send for FramePool<T> {}
@@ -31,7 +31,7 @@ where
 
         // 1. Allocate index queue BEFORE the heap memory is claimed.
         // If this fails, no raw memory is left orphaned or leaked.
-        let available_indices = MpmcRingBuffer::new(max_frames);
+        let available_indices = SpscRingBuffer::new(max_frames);
         for i in 0..max_frames {
             let _ = available_indices.push(i);
         }

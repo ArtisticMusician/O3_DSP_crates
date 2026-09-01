@@ -1,5 +1,5 @@
-#![feature(portable_simd)]
-use std::simd::f32x8;
+//#![feature(portable_simd)]
+use std::simd::{f32x8, StdFloat};
 
 #[repr(align(64))]
 pub struct AudioBlock<const N: usize> {
@@ -51,7 +51,7 @@ impl SimdArrayProcessor {
             let mut l_lane = std::ptr::read(current_left);
             let r_lane = std::ptr::read(right_ptr.add(i));
 
-            l_lane = mix_vec.fma(r_lane - l_lane, l_lane);
+            l_lane = mix_vec.mul_add(r_lane - l_lane, l_lane);
 
             std::ptr::write(current_left, l_lane);
         }

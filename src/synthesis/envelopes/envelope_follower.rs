@@ -1,5 +1,3 @@
-// use crate::synthesis::utils::ParameterSmoother;
-
 /// Envelope Follower for dynamic processing (Compressors, Gates, Auto-wah).
 /// Tracks the amplitude envelope of an incoming audio signal.
 #[derive(Debug, Clone)]
@@ -67,8 +65,9 @@ impl EnvelopeFollower {
     /// Process a block of samples and output the envelope array.
     #[inline]
     pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
-        for (i, &sample) in input.iter().enumerate() {
-            output[i] = self.process_sample(sample);
+        let min_len = input.len().min(output.len());
+        for i in 0..min_len {
+            output[i] = self.process_sample(input[i]);
         }
     }
 }

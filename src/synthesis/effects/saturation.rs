@@ -1,9 +1,11 @@
+use crate::synthesis::utils::Processor;
+
 /// Saturation and waveshaping effect.
 /// Adds harmonic distortion by applying a non-linear transfer function.
 pub struct Saturation {
-    pub drive: f32, // Input gain (linear multiplier)
-    pub mix: f32,   // Wet/dry mix (0.0 to 1.0)
-    pub mode: SaturationMode,
+    drive: f32, // Input gain (linear multiplier)
+    mix: f32,   // Wet/dry mix (0.0 to 1.0)
+    mode: SaturationMode,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -30,7 +32,15 @@ impl Saturation {
     }
 
     #[inline(always)]
-    pub fn process_sample(&mut self, input: f32) -> f32 {
+    fn fast_tanh(x: f32) -> f32 {
+        let x2 = x * x;
+        x * (27.0 + x2) / (27.0 + 9.0 * x2)
+    }
+}
+
+impl Processor for Saturation {
+    #[inline(always)]
+    fn process_sample(&mut self, input: f32) -> f32 {
         let driven = input * self.drive;
 
         let processed = match self.mode {
@@ -42,17 +52,24 @@ impl Saturation {
                 x - (x * x * x) / 6.0
             },
             SaturationMode::Tanh => {
-                driven.tanh()
+                Self::fast_tanh(driven)
             },
             SaturationMode::Foldback => {
+                // Odd-symmetric foldback
                 let threshold = 1.0;
                 let mut x = driven;
-                // Simple fast folding for high drive
-                if x > threshold || x < -threshold {
-                    x = (x + threshold) % (4.0 * threshold) - threshold;
-                    if x > threshold {
-                        x = 2.0 * threshold - x;
+                let is_neg = x < 0.0;
+                let abs_x = x.abs();
+
+                if abs_x > threshold {
+                    let mut folded = abs_x;
+                    folded = folded.rem_euclid(4.0 * threshold);
+                    if folded > 3.0 * threshold {
+                        folded -= 4.0 * threshold;
+                    } else if folded > threshold {
+                        folded = 2.0 * threshold - folded;
                     }
+                    x = if is_neg { -folded } else { folded };
                 }
                 x
             }
@@ -63,12 +80,5 @@ impl Saturation {
         let wet = processed * makeup;
 
         input * (1.0 - self.mix) + wet * self.mix
-    }
-
-    #[inline]
-    pub fn process_block(&mut self, buffer: &mut [f32]) {
-        for sample in buffer.iter_mut() {
-            *sample = self.process_sample(*sample);
-        }
     }
 }
