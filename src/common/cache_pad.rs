@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, AtomicBool, AtomicU32};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize};
 
 /// A hardware-isolated, cross-platform atomic wrapper designed to prevent false sharing.
 /// Uses the compiler's native alignment rules to automatically calculate optimal trailing padding size.

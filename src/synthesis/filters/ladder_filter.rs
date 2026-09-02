@@ -5,27 +5,27 @@ use std::f32::consts::PI;
 #[derive(Debug, Clone, Copy)]
 pub struct LadderFilter {
     sample_rate: f32,
-    
+
     // Stage delay registers (capacitors)
     s1: f32,
     s2: f32,
     s3: f32,
     s4: f32,
-    
+
     // Active smoothed parameters
     current_cutoff: f32,
     current_resonance: f32,
-    
+
     // Cached coefficients for the hot sample loop
     g: f32,
     h: f32,
     k: f32,
-    gamma: f32, 
-    
+    gamma: f32,
+
     // Target parameters
     target_cutoff: f32,
     target_resonance: f32,
-    
+
     // Smoothing coefficient
     smooth_coef: f32,
 }
@@ -52,7 +52,7 @@ impl LadderFilter {
         }
     }
 
-    /// Hardware Control Utility: Forces the current host thread's CPU registers 
+    /// Hardware Control Utility: Forces the current host thread's CPU registers
     /// into Flush-to-Zero (FTZ) and Denormals-Are-Zero (DAZ) states on x86_64.
     /// Safely isolated via conditional attributes to prevent compilation failures during cross-compiling.
     #[cfg(target_arch = "x86_64")]
@@ -81,7 +81,8 @@ impl LadderFilter {
     #[inline]
     pub fn update_coefficients(&mut self) {
         self.current_cutoff += (self.target_cutoff - self.current_cutoff) * self.smooth_coef;
-        self.current_resonance += (self.target_resonance - self.current_resonance) * self.smooth_coef;
+        self.current_resonance +=
+            (self.target_resonance - self.current_resonance) * self.smooth_coef;
 
         let wd = PI * self.current_cutoff;
         self.g = (wd / self.sample_rate).tan();
@@ -108,17 +109,15 @@ impl LadderFilter {
         let h4 = h3 * h;
 
         // 1. Instantaneous Loop Feedback Estimation (Sigma)
-        let sigma = (g3 * h4 * self.s1) + 
-                    (g2 * h3 * self.s2) + 
-                    (g * h2 * self.s3) + 
-                    (h * self.s4);
+        let sigma = (g3 * h4 * self.s1) + (g2 * h3 * self.s2) + (g * h2 * self.s3) + (h * self.s4);
 
         // 2. Continuous-Time Saturation Emulation with Bipolar Anti-Denormal Bias
         let mut input_node = (sample + 1e-25) - k * sigma;
-        
+
         // Highly optimized cubic tanh approximation to clip feedback smoothly
         input_node = input_node.clamp(-3.0, 3.0);
-        let saturated_input = input_node * (27.0 + input_node * input_node) / (27.0 + 9.0 * input_node * input_node);
+        let saturated_input =
+            input_node * (27.0 + input_node * input_node) / (27.0 + 9.0 * input_node * input_node);
 
         // 3. Solve the Final Input Equation via pre-cached gamma factor
         let x0 = saturated_input / (1.0 + k * self.gamma);
@@ -139,7 +138,7 @@ impl LadderFilter {
         // 5. Subtract the bias out at the final node to maintain a clean DC baseline
         let v4 = (u3 - self.s4) * g * h;
         let u4 = v4 + self.s4;
-        self.s4 = u4 + v4 - 1e-25; 
+        self.s4 = u4 + v4 - 1e-25;
 
         u4
     }

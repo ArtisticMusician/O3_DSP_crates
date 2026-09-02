@@ -44,16 +44,12 @@ impl Processor for Saturation {
         let driven = input * self.drive;
 
         let processed = match self.mode {
-            SaturationMode::HardClip => {
-                driven.clamp(-1.0, 1.0)
-            },
+            SaturationMode::HardClip => driven.clamp(-1.0, 1.0),
             SaturationMode::SoftClip => {
                 let x = driven.clamp(-1.5, 1.5);
                 x - (x * x * x) / 6.0
-            },
-            SaturationMode::Tanh => {
-                Self::fast_tanh(driven)
-            },
+            }
+            SaturationMode::Tanh => Self::fast_tanh(driven),
             SaturationMode::Foldback => {
                 // Odd-symmetric foldback
                 let threshold = 1.0;

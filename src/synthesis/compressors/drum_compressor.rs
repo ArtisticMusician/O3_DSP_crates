@@ -13,13 +13,13 @@ impl DrumCompressor {
         let mut comp = Self {
             sample_rate,
             threshold_db: -12.0,
-            ratio_slope: 0.75, 
+            ratio_slope: 0.75,
             attack_coef: 0.0,
             release_coef: 0.0,
             envelope: 0.0,
         };
-        comp.set_attack_ms(5.0);   
-        comp.set_release_ms(50.0); 
+        comp.set_attack_ms(5.0);
+        comp.set_release_ms(50.0);
         comp
     }
 
@@ -49,9 +49,11 @@ impl DrumCompressor {
         let target_gr_db = over_threshold * self.ratio_slope;
 
         if target_gr_db > self.envelope {
-            self.envelope = self.attack_coef * self.envelope + (1.0 - self.attack_coef) * target_gr_db;
+            self.envelope =
+                self.attack_coef * self.envelope + (1.0 - self.attack_coef) * target_gr_db;
         } else {
-            self.envelope = self.release_coef * self.envelope + (1.0 - self.release_coef) * target_gr_db;
+            self.envelope =
+                self.release_coef * self.envelope + (1.0 - self.release_coef) * target_gr_db;
         }
 
         let final_gain_lin = (-self.envelope * 0.11512925).exp();

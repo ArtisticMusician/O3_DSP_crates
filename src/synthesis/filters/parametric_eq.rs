@@ -15,7 +15,14 @@ impl ParametricEq {
         Self { bands }
     }
 
-    pub fn set_band(&mut self, index: usize, cutoff_hz: f32, q: f32, gain_db: f32, filter_type: BiquadType) {
+    pub fn set_band(
+        &mut self,
+        index: usize,
+        cutoff_hz: f32,
+        q: f32,
+        gain_db: f32,
+        filter_type: BiquadType,
+    ) {
         if let Some(band) = self.bands.get_mut(index) {
             band.filter_type = filter_type;
             band.set_parameters(cutoff_hz, q, gain_db);

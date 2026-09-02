@@ -26,7 +26,8 @@ impl MoogLadderFilter {
     }
 
     pub fn set_parameters(&mut self, cutoff_hz: f32, resonance: f32, drive: f32) {
-        self.cutoff_smoother.set_target(cutoff_hz.clamp(20.0, self.sample_rate * 0.45));
+        self.cutoff_smoother
+            .set_target(cutoff_hz.clamp(20.0, self.sample_rate * 0.45));
         self.res_smoother.set_target(resonance.clamp(0.0, 4.0));
         self.drive_smoother.set_target(drive.clamp(1.0, 10.0));
     }
@@ -53,9 +54,11 @@ impl Processor for MoogLadderFilter {
         let t0 = input_stage;
 
         for i in 0..4 {
-            let st_in = if i == 0 { t0 } else { self.stage[i-1] };
+            let st_in = if i == 0 { t0 } else { self.stage[i - 1] };
             self.stage[i] += g * (Self::fast_tanh(st_in) - Self::fast_tanh(self.stage[i]));
-            if self.stage[i].abs() < 1e-15 { self.stage[i] = 0.0; }
+            if self.stage[i].abs() < 1e-15 {
+                self.stage[i] = 0.0;
+            }
         }
 
         self.stage[3]

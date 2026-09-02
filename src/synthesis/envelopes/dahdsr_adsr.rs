@@ -13,18 +13,18 @@ pub enum AdsrStage {
 pub struct AdsrEnvelope {
     stage: AdsrStage,
     current_level: f32,
-    
+
     // Cached curve multipliers
     attack_coef: f32,
     decay_coef: f32,
     release_coef: f32,
     sustain_level: f32,
-    
+
     // Cached target phase durations in total samples
     attack_samples: u32,
     decay_samples: u32,
     release_samples: u32,
-    
+
     // Active step counter
     stage_samples: u32,
     sample_rate: f32,
@@ -47,16 +47,34 @@ impl AdsrEnvelope {
         }
     }
 
-    /// Updates all internal tracking structures simultaneously. 
+    /// Updates all internal tracking structures simultaneously.
     /// 100% real-time safe against dynamic parameter automation shifts mid-phase.
-    pub fn set_parameters(&mut self, attack_sec: f32, decay_sec: f32, sustain_lvl: f32, release_sec: f32) {
+    pub fn set_parameters(
+        &mut self,
+        attack_sec: f32,
+        decay_sec: f32,
+        sustain_lvl: f32,
+        release_sec: f32,
+    ) {
         self.sustain_level = sustain_lvl.clamp(0.0, 1.0);
-        
+
         // Pre-calculate natural capacitor exponential mapping coefficients
-        self.attack_coef = if attack_sec > 0.0 { 1.0 - (-1.0 / (attack_sec * self.sample_rate)).exp() } else { 1.0 };
-        self.decay_coef = if decay_sec > 0.0 { 1.0 - (-1.0 / (decay_sec * self.sample_rate)).exp() } else { 1.0 };
-        self.release_coef = if release_sec > 0.0 { 1.0 - (-1.0 / (release_sec * self.sample_rate)).exp() } else { 1.0 };
-        
+        self.attack_coef = if attack_sec > 0.0 {
+            1.0 - (-1.0 / (attack_sec * self.sample_rate)).exp()
+        } else {
+            1.0
+        };
+        self.decay_coef = if decay_sec > 0.0 {
+            1.0 - (-1.0 / (decay_sec * self.sample_rate)).exp()
+        } else {
+            1.0
+        };
+        self.release_coef = if release_sec > 0.0 {
+            1.0 - (-1.0 / (release_sec * self.sample_rate)).exp()
+        } else {
+            1.0
+        };
+
         // Calculate new total target sample durations
         let new_attack_samples = (attack_sec * self.sample_rate).max(1.0) as u32;
         let new_decay_samples = (decay_sec * self.sample_rate).max(1.0) as u32;
@@ -125,7 +143,7 @@ impl AdsrEnvelope {
             AdsrStage::Attack => {
                 self.current_level += (1.005 - self.current_level) * self.attack_coef;
                 self.stage_samples = self.stage_samples.saturating_sub(1);
-                
+
                 if self.stage_samples == 0 || self.current_level >= 1.0 {
                     self.current_level = 1.0;
                     self.stage = AdsrStage::Decay;
@@ -135,7 +153,7 @@ impl AdsrEnvelope {
             AdsrStage::Decay => {
                 self.current_level += (self.sustain_level - self.current_level) * self.decay_coef;
                 self.stage_samples = self.stage_samples.saturating_sub(1);
-                
+
                 if self.stage_samples == 0 {
                     self.current_level = self.sustain_level;
                     self.stage = AdsrStage::Sustain;
@@ -148,7 +166,7 @@ impl AdsrEnvelope {
             AdsrStage::Release => {
                 self.current_level += (-0.005 - self.current_level) * self.release_coef;
                 self.stage_samples = self.stage_samples.saturating_sub(1);
-                
+
                 if self.stage_samples == 0 || self.current_level <= 0.0 {
                     self.current_level = 0.0;
                     self.stage = AdsrStage::Idle;

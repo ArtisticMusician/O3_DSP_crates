@@ -1,5 +1,5 @@
-pub mod saturation;
 pub mod delay;
+pub mod saturation;
 
-pub use saturation::{Saturation, SaturationMode};
 pub use delay::MonoFeedbackDelay;
+pub use saturation::{Saturation, SaturationMode};

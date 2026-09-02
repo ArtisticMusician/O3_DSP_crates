@@ -1,7 +1,7 @@
 #[derive(Clone, Debug)]
 pub struct SslGlueCompressor {
     sample_rate: f32,
-    
+
     threshold_db: f32,
     ratio_slope: f32,
     makeup_gain_db: f32,
@@ -12,12 +12,12 @@ pub struct SslGlueCompressor {
     attack_coef: f32,
     release_coef: f32,
     envelope_db: f32,
-    
+
     auto_fast_attack_coef: f32,
     auto_fast_release_coef: f32,
     auto_slow_attack_coef: f32,
     auto_slow_release_coef: f32,
-    
+
     auto_fast_env_db: f32,
     auto_slow_env_db: f32,
 }
@@ -32,22 +32,22 @@ impl SslGlueCompressor {
             knee_half_db: 2.0,
             knee_inv: 0.125,
             auto_release: false,
-            
+
             attack_coef: 0.0,
             release_coef: 0.0,
             envelope_db: 0.0,
-            
+
             auto_fast_attack_coef: 0.0,
             auto_fast_release_coef: 0.0,
             auto_slow_attack_coef: 0.0,
             auto_slow_release_coef: 0.0,
-            
+
             auto_fast_env_db: 0.0,
             auto_slow_env_db: 0.0,
         };
-        
+
         comp.set_attack_ms(1.0);
-        comp.set_release_ms(None); 
+        comp.set_release_ms(None);
         comp
     }
 
@@ -88,7 +88,7 @@ impl SslGlueCompressor {
             self.auto_release = true;
             self.auto_fast_release_coef = self.calculate_coef(200.0);
             self.auto_slow_release_coef = self.calculate_coef(2500.0);
-            self.auto_slow_attack_coef = self.calculate_coef(100.0); 
+            self.auto_slow_attack_coef = self.calculate_coef(100.0);
         }
     }
 
@@ -112,7 +112,7 @@ impl SslGlueCompressor {
         let sidechain_db = Self::lin2db(sidechain_lin);
 
         let over_threshold = sidechain_db - self.threshold_db;
-        
+
         let target_gr_db = if self.knee_half_db > 0.0 {
             if over_threshold > self.knee_half_db {
                 over_threshold * self.ratio_slope
@@ -132,23 +132,29 @@ impl SslGlueCompressor {
 
         if self.auto_release {
             if target_gr_db > self.auto_fast_env_db {
-                self.auto_fast_env_db = self.auto_fast_attack_coef * self.auto_fast_env_db + (1.0 - self.auto_fast_attack_coef) * target_gr_db;
+                self.auto_fast_env_db = self.auto_fast_attack_coef * self.auto_fast_env_db
+                    + (1.0 - self.auto_fast_attack_coef) * target_gr_db;
             } else {
-                self.auto_fast_env_db = self.auto_fast_release_coef * self.auto_fast_env_db + (1.0 - self.auto_fast_release_coef) * target_gr_db;
+                self.auto_fast_env_db = self.auto_fast_release_coef * self.auto_fast_env_db
+                    + (1.0 - self.auto_fast_release_coef) * target_gr_db;
             }
 
             if target_gr_db > self.auto_slow_env_db {
-                self.auto_slow_env_db = self.auto_slow_attack_coef * self.auto_slow_env_db + (1.0 - self.auto_slow_attack_coef) * target_gr_db;
+                self.auto_slow_env_db = self.auto_slow_attack_coef * self.auto_slow_env_db
+                    + (1.0 - self.auto_slow_attack_coef) * target_gr_db;
             } else {
-                self.auto_slow_env_db = self.auto_slow_release_coef * self.auto_slow_env_db + (1.0 - self.auto_slow_release_coef) * target_gr_db;
+                self.auto_slow_env_db = self.auto_slow_release_coef * self.auto_slow_env_db
+                    + (1.0 - self.auto_slow_release_coef) * target_gr_db;
             }
 
             self.envelope_db = self.auto_fast_env_db.max(self.auto_slow_env_db);
         } else {
             if target_gr_db > self.envelope_db {
-                self.envelope_db = self.attack_coef * self.envelope_db + (1.0 - self.attack_coef) * target_gr_db;
+                self.envelope_db =
+                    self.attack_coef * self.envelope_db + (1.0 - self.attack_coef) * target_gr_db;
             } else {
-                self.envelope_db = self.release_coef * self.envelope_db + (1.0 - self.release_coef) * target_gr_db;
+                self.envelope_db =
+                    self.release_coef * self.envelope_db + (1.0 - self.release_coef) * target_gr_db;
             }
         }
 

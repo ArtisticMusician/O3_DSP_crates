@@ -16,7 +16,7 @@ pub struct LowFrequencyOscillator {
     phase: f32,
     phase_increment: f32,
     sample_rate: f32,
-    
+
     // Cached targets for smooth parameter interpolation
     target_frequency: f32,
     current_frequency: f32,
@@ -44,7 +44,7 @@ impl LowFrequencyOscillator {
         self.target_frequency = frequency_hz.clamp(0.001, 50.0);
     }
 
-    /// Forces the LFO phase back to zero. Call this on MIDI Note-On events 
+    /// Forces the LFO phase back to zero. Call this on MIDI Note-On events
     /// if "LFO Sync" or "Retrigger" is enabled in your engine architecture.
     #[inline]
     pub fn retrigger(&mut self) {
@@ -56,30 +56,31 @@ impl LowFrequencyOscillator {
     #[inline(always)]
     pub fn next_sample(&mut self, waveform: LfoWaveform) -> f32 {
         // 1. Smoothly interpolate frequency to eliminate zipper artifacts during sweeps
-        self.current_frequency += (self.target_frequency - self.current_frequency) * self.freq_smooth_coef;
+        self.current_frequency +=
+            (self.target_frequency - self.current_frequency) * self.freq_smooth_coef;
         self.phase_increment = self.current_frequency / self.sample_rate;
 
         // 2. Generate the waveform pattern based on the uncorrupted phase register
         let output = match waveform {
             LfoWaveform::Sine => (self.phase * TWO_PI).sin(),
-            
+
             LfoWaveform::Triangle => {
                 // Symmetrical, zero-centered triangle wave conversion
                 let val = (self.phase * 2.0) - 1.0;
                 2.0 * val.abs() - 1.0
             }
-            
-            LfoWaveform::SawUp => {
-                (self.phase * 2.0) - 1.0
-            }
-            
-            LfoWaveform::SawDown => {
-                1.0 - (self.phase * 2.0)
-            }
-            
+
+            LfoWaveform::SawUp => (self.phase * 2.0) - 1.0,
+
+            LfoWaveform::SawDown => 1.0 - (self.phase * 2.0),
+
             LfoWaveform::Square => {
                 // Branchless evaluation to prevent pipeline stalls
-                if self.phase < 0.5 { 1.0 } else { -1.0 }
+                if self.phase < 0.5 {
+                    1.0
+                } else {
+                    -1.0
+                }
             }
         };
 

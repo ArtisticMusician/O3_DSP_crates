@@ -7,7 +7,7 @@ pub struct TransientShaper {
     fast_follower: EnvelopeFollower,
     slow_follower: EnvelopeFollower,
 
-    pub attack_gain: f32, // Linear gain > 1.0 (boost), < 1.0 (cut)
+    pub attack_gain: f32,  // Linear gain > 1.0 (boost), < 1.0 (cut)
     pub sustain_gain: f32, // Linear gain > 1.0 (boost), < 1.0 (cut)
 }
 

@@ -56,11 +56,15 @@ impl TableOscillator {
             Waveform::Square => {
                 let naive = if self.phase < 0.5 { 1.0 } else { -1.0 };
                 let mut blep_corrected = naive + self.poly_blep(self.phase);
-                
+
                 // Branchless replacement for the expensive floating-point modulo operator
                 let half_phase = self.phase + 0.5;
-                let half_phase_wrapped = if half_phase >= 1.0 { half_phase - 1.0 } else { half_phase };
-                
+                let half_phase_wrapped = if half_phase >= 1.0 {
+                    half_phase - 1.0
+                } else {
+                    half_phase
+                };
+
                 blep_corrected -= self.poly_blep(half_phase_wrapped);
                 blep_corrected
             }

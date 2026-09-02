@@ -1,5 +1,5 @@
-use crate::memory::frame_guard::FrameGuard;
 use crate::common::spsc_queue::SpscRingBuffer;
+use crate::memory::frame_guard::FrameGuard;
 use std::alloc::{alloc, dealloc, Layout};
 use std::mem;
 use std::ptr;
@@ -24,8 +24,14 @@ where
     /// Instantiate completely on the UI / Main Initialization thread.
     /// Bypasses all standard container overhead to achieve direct, single-pass zero-copy heap allocation.
     pub fn new(max_frames: usize, frame_size: usize) -> Self {
-        assert!(max_frames.is_power_of_two(), "Max frames must be a power of 2.");
-        assert!(mem::size_of::<T>() > 0, "Zero-Sized Types are not supported.");
+        assert!(
+            max_frames.is_power_of_two(),
+            "Max frames must be a power of 2."
+        );
+        assert!(
+            mem::size_of::<T>() > 0,
+            "Zero-Sized Types are not supported."
+        );
 
         let total_elements = max_frames * frame_size;
 
@@ -37,11 +43,12 @@ where
         }
 
         // 2. Compute a hardware-optimized layout forced to 64-byte alignment
-        let raw_layout = Layout::array::<T>(total_elements)
-            .expect("Valid memory layout computation failure.");
-        
+        let raw_layout =
+            Layout::array::<T>(total_elements).expect("Valid memory layout computation failure.");
+
         // Force alignment to 64 bytes to guarantee fast SIMD vector memory alignment
-        let layout = raw_layout.align_to(64)
+        let layout = raw_layout
+            .align_to(64)
             .expect("Forced structural alignment mapping failure.");
 
         // 3. Request the exact memory block directly from the global heap allocator
@@ -74,7 +81,7 @@ where
     pub fn checkout(&self) -> Option<FrameGuard<'_, T>> {
         let slot_idx = self.available_indices.pop()?;
         let start_offset = slot_idx * self.frame_size;
-        
+
         // Safety:
         // 1. `slot_idx` is uniquely leased to this thread by the atomic MPMC pop.
         // 2. The sub-slice is derived via offset calculation from an explicitly aligned raw pointer base.
@@ -82,7 +89,7 @@ where
         unsafe {
             let frame_ptr = self.base_ptr.add(start_offset);
             let slice = std::slice::from_raw_parts_mut(frame_ptr, self.frame_size);
-            
+
             Some(FrameGuard {
                 pool: self,
                 slot_idx,
@@ -96,7 +103,7 @@ impl<T> Drop for FramePool<T> {
     fn drop(&mut self) {
         unsafe {
             // Drop individual elements inside the raw allocation block.
-            // Note: Since T: Copy, the compiler recognizes this loop as a dead no-op 
+            // Note: Since T: Copy, the compiler recognizes this loop as a dead no-op
             // and strips it completely from the final optimized release binary.
             for i in 0..self.total_elements {
                 ptr::drop_in_place(self.base_ptr.add(i));

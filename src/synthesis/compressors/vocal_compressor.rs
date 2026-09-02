@@ -6,10 +6,10 @@ pub struct VocalCompressor {
     makeup_gain_lin: f32,
     knee_half_db: f32,
     knee_inv: f32,
-    
+
     rms_coef: f32,
     rms_state: f32,
-    
+
     attack_coef: f32,
     release_coef: f32,
     envelope: f32,
@@ -20,9 +20,9 @@ impl VocalCompressor {
         let mut comp = Self {
             sample_rate,
             threshold_db: -18.0,
-            ratio_slope: 0.5, 
+            ratio_slope: 0.5,
             makeup_gain_lin: 1.0,
-            knee_half_db: 2.5, 
+            knee_half_db: 2.5,
             knee_inv: 0.1,
             rms_coef: 0.0,
             rms_state: 0.0,
@@ -30,10 +30,10 @@ impl VocalCompressor {
             release_coef: 0.0,
             envelope: 0.0,
         };
-        
-        comp.set_rms_window_ms(30.0); 
-        comp.set_attack_ms(20.0);     
-        comp.set_release_ms(150.0);   
+
+        comp.set_rms_window_ms(30.0);
+        comp.set_attack_ms(20.0);
+        comp.set_release_ms(150.0);
         comp
     }
 
@@ -77,9 +77,9 @@ impl VocalCompressor {
     #[inline(always)]
     pub fn process_sample(&mut self, left: f32, right: f32) -> (f32, f32) {
         let input_power = (left * left + right * right) * 0.5;
-        
+
         self.rms_state = self.rms_coef * self.rms_state + (1.0 - self.rms_coef) * input_power;
-        
+
         let sidechain_lin = self.rms_state.sqrt().max(1e-12);
         let sidechain_db = sidechain_lin.ln() * 8.6858896;
 

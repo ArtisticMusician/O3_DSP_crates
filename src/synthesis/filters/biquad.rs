@@ -1,7 +1,8 @@
-use std::f32::consts::TAU as TWO_PI;
 use crate::synthesis::utils::{ParameterSmoother, Processor};
+use std::f32::consts::TAU as TWO_PI;
 
-/// Normalized Direct Form I coefficients (feedforward a*, feedback b*).
+/// Biquad filter coefficients for various filter types.
+/// Real-time safe, parameter smoothed.
 #[derive(Debug, Clone, Copy)]
 pub struct BiquadCoefficients {
     pub a0: f32,
@@ -12,81 +13,119 @@ pub struct BiquadCoefficients {
 }
 
 impl BiquadCoefficients {
-    #[inline]
-    fn normalize(b0: f32, b1: f32, b2: f32, a0: f32, a1: f32, a2: f32) -> Self {
-        let inv = 1.0 / a0;
-        Self {
-            a0: b0 * inv,
-            a1: b1 * inv,
-            a2: b2 * inv,
-            b1: a1 * inv,
-            b2: a2 * inv,
-        }
-    }
-
-    #[inline]
+    #[inline(always)]
     pub fn lowpass(cutoff: f32, q: f32, sample_rate: f32) -> Self {
         let omega = TWO_PI * cutoff / sample_rate;
         let alpha = omega.sin() / (2.0 * q);
         let cosw = omega.cos();
-        Self::normalize(
-            (1.0 - cosw) * 0.5,
-            1.0 - cosw,
-            (1.0 - cosw) * 0.5,
-            1.0 + alpha,
-            -2.0 * cosw,
-            1.0 - alpha,
-        )
+
+        let b0 = (1.0 - cosw) * 0.5;
+        let b1 = 1.0 - cosw;
+        let b2 = b0;
+        let a0 = 1.0 + alpha;
+        let a1 = -2.0 * cosw;
+        let a2 = 1.0 - alpha;
+
+        Self {
+            a0: b0 / a0,
+            a1: b1 / a0,
+            a2: b2 / a0,
+            b1: a1 / a0,
+            b2: a2 / a0,
+        }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn highpass(cutoff: f32, q: f32, sample_rate: f32) -> Self {
         let omega = TWO_PI * cutoff / sample_rate;
         let alpha = omega.sin() / (2.0 * q);
         let cosw = omega.cos();
-        Self::normalize(
-            (1.0 + cosw) * 0.5,
-            -(1.0 + cosw),
-            (1.0 + cosw) * 0.5,
-            1.0 + alpha,
-            -2.0 * cosw,
-            1.0 - alpha,
-        )
+
+        let b0 = (1.0 + cosw) * 0.5;
+        let b1 = -(1.0 + cosw);
+        let b2 = b0;
+        let a0 = 1.0 + alpha;
+        let a1 = -2.0 * cosw;
+        let a2 = 1.0 - alpha;
+
+        Self {
+            a0: b0 / a0,
+            a1: b1 / a0,
+            a2: b2 / a0,
+            b1: a1 / a0,
+            b2: a2 / a0,
+        }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn bandpass(cutoff: f32, q: f32, sample_rate: f32) -> Self {
         let omega = TWO_PI * cutoff / sample_rate;
         let alpha = omega.sin() / (2.0 * q);
         let cosw = omega.cos();
-        Self::normalize(alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * cosw, 1.0 - alpha)
+
+        let b0 = alpha;
+        let b1 = 0.0;
+        let b2 = -alpha;
+        let a0 = 1.0 + alpha;
+        let a1 = -2.0 * cosw;
+        let a2 = 1.0 - alpha;
+
+        Self {
+            a0: b0 / a0,
+            a1: b1 / a0,
+            a2: b2 / a0,
+            b1: a1 / a0,
+            b2: a2 / a0,
+        }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn notch(cutoff: f32, q: f32, sample_rate: f32) -> Self {
         let omega = TWO_PI * cutoff / sample_rate;
         let alpha = omega.sin() / (2.0 * q);
         let cosw = omega.cos();
-        Self::normalize(1.0, -2.0 * cosw, 1.0, 1.0 + alpha, -2.0 * cosw, 1.0 - alpha)
+
+        let b0 = 1.0;
+        let b1 = -2.0 * cosw;
+        let b2 = 1.0;
+        let a0 = 1.0 + alpha;
+        let a1 = -2.0 * cosw;
+        let a2 = 1.0 - alpha;
+
+        Self {
+            a0: b0 / a0,
+            a1: b1 / a0,
+            a2: b2 / a0,
+            b1: a1 / a0,
+            b2: a2 / a0,
+        }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn peaking(cutoff: f32, q: f32, gain_db: f32, sample_rate: f32) -> Self {
         let omega = TWO_PI * cutoff / sample_rate;
         let alpha = omega.sin() / (2.0 * q);
         let cosw = omega.cos();
-        let a = 10.0_f32.powf(gain_db * 0.025);
-        Self::normalize(
-            1.0 + alpha * a,
-            -2.0 * cosw,
-            1.0 - alpha * a,
-            1.0 + alpha / a,
-            -2.0 * cosw,
-            1.0 - alpha / a,
-        )
+        let a = 10.0_f32.powf(gain_db / 40.0);
+
+        let b0 = 1.0 + alpha * a;
+        let b1 = -2.0 * cosw;
+        let b2 = 1.0 - alpha * a;
+        let a0 = 1.0 + alpha / a;
+        let a1 = -2.0 * cosw;
+        let a2 = 1.0 - alpha / a;
+
+        Self {
+            a0: b0 / a0,
+            a1: b1 / a0,
+            a2: b2 / a0,
+            b1: a1 / a0,
+            b2: a2 / a0,
+        }
     }
 }
 
+/// High-performance Biquad IIR filter with parameter smoothing.
 #[derive(Debug, Clone, Copy)]
 pub struct BiquadFilter {
     b0: f32,
@@ -103,15 +142,11 @@ pub struct BiquadFilter {
     q_smoother: ParameterSmoother,
     gain_smoother: ParameterSmoother,
 
-    last_cutoff: f32,
-    last_q: f32,
-    last_gain: f32,
-
     sample_rate: f32,
     pub filter_type: BiquadType,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BiquadType {
     LowPass,
     HighPass,
@@ -135,13 +170,10 @@ impl BiquadFilter {
             cutoff_smoother: ParameterSmoother::new(sample_rate, 15.0, 1000.0),
             q_smoother: ParameterSmoother::new(sample_rate, 15.0, 0.707),
             gain_smoother: ParameterSmoother::new(sample_rate, 15.0, 0.0),
-            last_cutoff: f32::NAN,
-            last_q: f32::NAN,
-            last_gain: f32::NAN,
             sample_rate,
             filter_type,
         };
-        filt.update_coefficients(true);
+        filt.update_coefficients();
         filt
     }
 
@@ -153,14 +185,10 @@ impl BiquadFilter {
     }
 
     #[inline]
-    fn update_coefficients(&mut self, force: bool) {
+    fn update_coefficients(&mut self) {
         let cutoff = self.cutoff_smoother.process_sample();
         let q = self.q_smoother.process_sample();
         let gain = self.gain_smoother.process_sample();
-
-        if !force && cutoff == self.last_cutoff && q == self.last_q && gain == self.last_gain {
-            return;
-        }
 
         let coefs = match self.filter_type {
             BiquadType::LowPass => BiquadCoefficients::lowpass(cutoff, q, self.sample_rate),
@@ -175,9 +203,6 @@ impl BiquadFilter {
         self.b2 = coefs.a2;
         self.a1 = coefs.b1;
         self.a2 = coefs.b2;
-        self.last_cutoff = cutoff;
-        self.last_q = q;
-        self.last_gain = gain;
     }
 
     pub fn reset(&mut self) {
@@ -191,16 +216,19 @@ impl BiquadFilter {
 impl Processor for BiquadFilter {
     #[inline(always)]
     fn process_sample(&mut self, sample: f32) -> f32 {
-        self.update_coefficients(false);
+        self.update_coefficients();
 
         let output = self.b0 * sample + self.b1 * self.x1 + self.b2 * self.x2
             - self.a1 * self.y1
             - self.a2 * self.y2;
 
+        let output = if output.abs() < 1e-15 { 0.0 } else { output };
+
         self.x2 = self.x1;
         self.x1 = sample;
         self.y2 = self.y1;
         self.y1 = output;
+
         output
     }
 }

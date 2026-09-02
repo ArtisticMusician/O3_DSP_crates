@@ -41,13 +41,13 @@ impl SimdArrayProcessor {
     pub unsafe fn mix_channels_avx2_fma(left: &mut [f32], right: &[f32], mix_coefficient: f32) {
         let mix_vec = f32x8::splat(mix_coefficient);
         let simd_len = left.len() / 8;
-        
+
         let left_ptr = left.as_mut_ptr() as *mut f32x8;
         let right_ptr = right.as_ptr() as *const f32x8;
 
         for i in 0..simd_len {
             let current_left = left_ptr.add(i);
-            
+
             let mut l_lane = std::ptr::read(current_left);
             let r_lane = std::ptr::read(right_ptr.add(i));
 
@@ -62,7 +62,7 @@ impl SimdArrayProcessor {
     pub fn mix_channels_fallback(left: &mut [f32], right: &[f32], mix_coefficient: f32) {
         let inv_mix = 1.0 - mix_coefficient;
         let len = left.len().min(right.len());
-        
+
         for i in 0..len {
             unsafe {
                 let l = left.get_unchecked_mut(i);
@@ -88,9 +88,14 @@ impl AudioEngineContext {
     /// Matching against the strategy enum allows full function inlining of the hot paths,
     /// completely eliminating indirect function call pipeline stalls.
     #[inline(always)]
-    pub fn process<const N: usize>(&self, left_channel: &mut AudioBlock<N>, right_channel: &AudioBlock<N>, mix: f32) {
+    pub fn process<const N: usize>(
+        &self,
+        left_channel: &mut AudioBlock<N>,
+        right_channel: &AudioBlock<N>,
+        mix: f32,
+    ) {
         let coeff = mix.clamp(0.0, 1.0);
-        
+
         match self.strategy {
             ProcessingStrategy::Avx2Fma => {
                 // Safety: Validated by resolve_strategy() at initialization
