@@ -1,13 +1,12 @@
 use crate::synthesis::utils::ParameterSmoother;
 
-/// A simple wavetable oscillator supporting 1D linear interpolation.
-/// Assumes a pre-computed wavetable that contains exactly 1 cycle.
+/// One-cycle wavetable oscillator with linear interpolation.
+/// Table must be non-empty. Power-of-two lengths use a bitmask wrap.
 #[derive(Debug, Clone)]
 pub struct WavetableOscillator {
     table: &'static [f32],
     phase: f32,
     sample_rate: f32,
-
     freq_smoother: ParameterSmoother,
 }
 
@@ -21,15 +20,15 @@ impl WavetableOscillator {
         }
     }
 
-    /// Update the internal wavetable reference (e.g., when switching waveforms).
-    /// Does not allocate.
     pub fn set_table(&mut self, table: &'static [f32]) {
         self.table = table;
+        if self.table.is_empty() {
+            self.phase = 0.0;
+        }
     }
 
-    /// Set the target frequency for the oscillator.
     pub fn set_frequency(&mut self, freq_hz: f32) {
-        self.freq_smoother.set_target(freq_hz.max(1.0));
+        self.freq_smoother.set_target(freq_hz.clamp(0.0, self.sample_rate * 0.45));
     }
 
     #[inline(always)]
@@ -40,33 +39,27 @@ impl WavetableOscillator {
         }
 
         let freq = self.freq_smoother.process_sample();
-        let phase_increment = freq / self.sample_rate;
-
         let table_len_f = table_len as f32;
-
-        // Calculate current index in the table
         let index = self.phase * table_len_f;
-
-        // Linear interpolation
         let index_trunc = index as usize;
         let index_frac = index - index_trunc as f32;
 
-        // Use mask if table length is power of 2, otherwise branch
-        let next_index = if table_len.is_power_of_two() {
-            (index_trunc + 1) & (table_len - 1)
+        let (i0, i1) = if table_len.is_power_of_two() {
+            let mask = table_len - 1;
+            (index_trunc & mask, (index_trunc + 1) & mask)
         } else {
-            if index_trunc + 1 >= table_len { 0 } else { index_trunc + 1 }
+            let i0 = if index_trunc >= table_len { 0 } else { index_trunc };
+            let i1 = i0 + 1;
+            (i0, if i1 >= table_len { 0 } else { i1 })
         };
 
-        let sample1 = self.table[index_trunc];
-        let sample2 = self.table[next_index];
+        let output = self.table[i0] + (self.table[i1] - self.table[i0]) * index_frac;
 
-        let output = sample1 + (sample2 - sample1) * index_frac;
-
-        // Advance phase
-        self.phase += phase_increment;
+        self.phase += freq / self.sample_rate;
         if self.phase >= 1.0 {
-            self.phase -= 1.0;
+            self.phase -= self.phase.floor();
+        } else if self.phase < 0.0 {
+            self.phase -= self.phase.floor();
         }
 
         output
