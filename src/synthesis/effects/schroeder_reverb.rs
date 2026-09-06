@@ -18,7 +18,8 @@ const COMB_DELAYS_441: [usize; 4] = [1116, 1188, 1277, 1356];
 const ALLPASS_DELAYS_441: [usize; 2] = [556, 441];
 
 fn scaled_delay(delay_at_441: usize, scale: f32) -> usize {
-    ((delay_at_441 as f32) * scale).round() as usize.max(2)
+    let samples = ((delay_at_441 as f32) * scale).round() as usize;
+    samples.max(2)
 }
 
 impl SchroederReverb {
