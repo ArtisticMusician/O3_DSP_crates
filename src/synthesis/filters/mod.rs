@@ -1,4 +1,7 @@
+pub mod allpass;
 pub mod biquad;
+pub mod comb;
+pub mod dc_blocker;
 pub mod fir;
 pub mod ladder_filter;
 pub mod ladder_filter_impl;
@@ -7,7 +10,10 @@ pub mod one_pole;
 pub mod parametric_eq;
 pub mod state_variable;
 
+pub use allpass::AllpassFilter;
 pub use biquad::{BiquadFilter, BiquadType};
+pub use comb::CombFilter;
+pub use dc_blocker::DcBlocker;
 pub use fir::FirFilter;
 pub use ladder_filter::LadderFilter;
 pub use ladder_filter_impl::LadderFilterProcessor;
@@ -24,6 +30,9 @@ pub enum FilterModule {
     Biquad(BiquadFilter),
     StateVariable(StateVariableFilter),
     MoogLadder(MoogLadderFilter),
+    DcBlocker(DcBlocker),
+    Comb(CombFilter),
+    Allpass(AllpassFilter),
 }
 
 impl Processor for FilterModule {
@@ -35,6 +44,9 @@ impl Processor for FilterModule {
             FilterModule::Biquad(flt) => flt.process_sample(sample),
             FilterModule::StateVariable(flt) => flt.process_sample(sample),
             FilterModule::MoogLadder(flt) => flt.process_sample(sample),
+            FilterModule::DcBlocker(flt) => flt.process(sample),
+            FilterModule::Comb(flt) => flt.process(sample),
+            FilterModule::Allpass(flt) => flt.process(sample),
         }
     }
 }
