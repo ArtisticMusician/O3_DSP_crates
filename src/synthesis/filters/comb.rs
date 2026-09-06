@@ -2,7 +2,8 @@ use crate::synthesis::utils::Processor;
 
 /// Feedback comb filter with a power-of-two delay line.
 ///
-/// `y[n] = x[n] + feedback * y[n - D]`
+/// `y[n] = x[n] + feedback * lp(y[n - D])`
+/// `damp` is a one-pole in the feedback path (0 = no damping).
 /// Allocate the line in `new()`; the process path is allocation-free.
 #[derive(Debug, Clone)]
 pub struct CombFilter {
@@ -11,6 +12,8 @@ pub struct CombFilter {
     write: usize,
     delay_samples: usize,
     feedback: f32,
+    damp: f32,
+    damp_state: f32,
 }
 
 impl CombFilter {
@@ -22,6 +25,8 @@ impl CombFilter {
             write: 0,
             delay_samples: max_delay_samples.min(capacity - 1).max(1),
             feedback: 0.5,
+            damp: 0.0,
+            damp_state: 0.0,
         }
     }
 
@@ -33,16 +38,23 @@ impl CombFilter {
         self.feedback = feedback.clamp(-0.99, 0.99);
     }
 
+    /// One-pole damping in the feedback loop. 0 = bright, ~0.2–0.4 = room-like.
+    pub fn set_damp(&mut self, damp: f32) {
+        self.damp = damp.clamp(0.0, 0.99);
+    }
+
     pub fn clear(&mut self) {
         self.buffer.fill(0.0);
         self.write = 0;
+        self.damp_state = 0.0;
     }
 
     #[inline(always)]
     pub fn process(&mut self, input: f32) -> f32 {
         let read = (self.write + self.buffer.len() - self.delay_samples) & self.mask;
         let delayed = self.buffer[read];
-        let y = input + delayed * self.feedback;
+        self.damp_state += self.damp * (delayed - self.damp_state);
+        let y = input + self.damp_state * self.feedback;
         self.buffer[self.write] = y;
         self.write = (self.write + 1) & self.mask;
         y

@@ -2,6 +2,7 @@ pub mod allpass;
 pub mod biquad;
 pub mod comb;
 pub mod dc_blocker;
+pub mod filter_bank;
 pub mod fir;
 pub mod ladder_filter;
 pub mod ladder_filter_impl;
@@ -14,6 +15,7 @@ pub use allpass::AllpassFilter;
 pub use biquad::{BiquadFilter, BiquadType};
 pub use comb::CombFilter;
 pub use dc_blocker::DcBlocker;
+pub use filter_bank::{AllpassBank, BankMode, CombBank};
 pub use fir::FirFilter;
 pub use ladder_filter::LadderFilter;
 pub use ladder_filter_impl::LadderFilterProcessor;
@@ -24,6 +26,8 @@ pub use state_variable::{StateVariableFilter, SvfMode};
 
 use crate::synthesis::utils::Processor;
 
+/// One active topology. For N combs / N allpasses use `CombBank` / `AllpassBank`
+/// (or `SchroederReverb`), not this enum.
 pub enum FilterModule {
     OnePole(OnePoleFilter),
     Ladder(LadderFilterProcessor),
@@ -33,6 +37,8 @@ pub enum FilterModule {
     DcBlocker(DcBlocker),
     Comb(CombFilter),
     Allpass(AllpassFilter),
+    CombBank(CombBank),
+    AllpassBank(AllpassBank),
 }
 
 impl Processor for FilterModule {
@@ -47,6 +53,8 @@ impl Processor for FilterModule {
             FilterModule::DcBlocker(flt) => flt.process(sample),
             FilterModule::Comb(flt) => flt.process(sample),
             FilterModule::Allpass(flt) => flt.process(sample),
+            FilterModule::CombBank(flt) => flt.process(sample),
+            FilterModule::AllpassBank(flt) => flt.process(sample),
         }
     }
 }
