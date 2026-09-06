@@ -38,7 +38,8 @@ impl CombFilter {
         self.feedback = feedback.clamp(-0.99, 0.99);
     }
 
-    /// One-pole damping in the feedback loop. 0 = bright, ~0.2–0.4 = room-like.
+    /// One-pole damping in the feedback loop. 0 = bright (tap is used raw),
+    /// ~0.2–0.4 = room-like.
     pub fn set_damp(&mut self, damp: f32) {
         self.damp = damp.clamp(0.0, 0.99);
     }
@@ -53,7 +54,8 @@ impl CombFilter {
     pub fn process(&mut self, input: f32) -> f32 {
         let read = (self.write + self.buffer.len() - self.delay_samples) & self.mask;
         let delayed = self.buffer[read];
-        self.damp_state += self.damp * (delayed - self.damp_state);
+        // damp=0 → damp_state = delayed (undamped comb).
+        self.damp_state = self.damp * self.damp_state + (1.0 - self.damp) * delayed;
         let y = input + self.damp_state * self.feedback;
         self.buffer[self.write] = y;
         self.write = (self.write + 1) & self.mask;
