@@ -17,17 +17,24 @@ pub struct SchroederReverb {
 const COMB_DELAYS_441: [usize; 4] = [1116, 1188, 1277, 1356];
 const ALLPASS_DELAYS_441: [usize; 2] = [556, 441];
 
+fn scaled_delay(delay_at_441: usize, scale: f32) -> usize {
+    ((delay_at_441 as f32) * scale).round() as usize.max(2)
+}
+
 impl SchroederReverb {
     pub fn new(sample_rate: f32) -> Self {
         let scale = sample_rate.max(1.0) / 44_100.0;
-        let comb_specs: Vec<(usize, f32)> = COMB_DELAYS_441
-            .iter()
-            .map(|&d| (((d as f32) * scale).round() as usize).max(2, 0.84))
-            .collect();
-        let ap_specs: Vec<(usize, f32)> = ALLPASS_DELAYS_441
-            .iter()
-            .map(|&d| (((d as f32) * scale).round() as usize).max(2, 0.5))
-            .collect();
+
+        let comb_specs = [
+            (scaled_delay(COMB_DELAYS_441[0], scale), 0.84),
+            (scaled_delay(COMB_DELAYS_441[1], scale), 0.84),
+            (scaled_delay(COMB_DELAYS_441[2], scale), 0.84),
+            (scaled_delay(COMB_DELAYS_441[3], scale), 0.84),
+        ];
+        let ap_specs = [
+            (scaled_delay(ALLPASS_DELAYS_441[0], scale), 0.5),
+            (scaled_delay(ALLPASS_DELAYS_441[1], scale), 0.5),
+        ];
 
         let mut combs = CombBank::new(&comb_specs, BankMode::Parallel);
         combs.set_damp_all(0.2);
@@ -40,7 +47,7 @@ impl SchroederReverb {
         }
     }
 
-    /// Room size → comb feedback. 0 = almost dry tank, 1 = long decay (~0.93).
+    /// Room size → comb feedback. 0 = short tank, 1 = long decay (~0.93).
     pub fn set_room_size(&mut self, size: f32) {
         let fb = 0.7 + 0.23 * size.clamp(0.0, 1.0);
         self.combs.set_feedback_all(fb);
