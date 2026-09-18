@@ -1,3 +1,4 @@
+pub mod chorus;
 pub mod chorus_flanger;
 pub mod delay;
 pub mod saturation;
@@ -6,6 +7,7 @@ pub mod reverb_fdn;
 pub mod ring_modulator;
 pub mod bitcrusher;
 
+pub use chorus::Chorus;
 pub use chorus_flanger::ChorusFlanger;
 pub use delay::MonoFeedbackDelay;
 pub use saturation::{Saturation, SaturationMode};

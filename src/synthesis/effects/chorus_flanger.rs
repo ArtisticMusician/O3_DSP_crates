@@ -8,6 +8,7 @@ pub struct ChorusFlanger {
     buffer_right: Vec<f32>,
     mask: usize,
     write_pos: usize,
+    max_delay_samples: f32,
 
     sample_rate: f32,
 
@@ -25,8 +26,10 @@ impl ChorusFlanger {
     pub fn new(sample_rate: f32) -> Self {
         // Pre-allocate up to 50ms of delay buffer (plus some safety margin)
         let capacity = ((0.055 * sample_rate).ceil() as usize).max(32).next_power_of_two();
+        let max_delay_samples = capacity as f32 - 3.0;
 
         Self {
+            max_delay_samples,
             buffer_left: vec![0.0; capacity],
             buffer_right: vec![0.0; capacity],
             mask: capacity - 1,
@@ -58,17 +61,18 @@ impl ChorusFlanger {
 
     pub fn set_depth_ms(&mut self, depth_ms: f32) {
         let depth_samples = (depth_ms * 0.001 * self.sample_rate).max(0.0);
-        self.depth_samples.set_target(depth_samples);
+        let base = self.base_delay_samples.current_value();
+        let safe_depth = depth_samples.min(self.max_delay_samples - base);
+        self.depth_samples.set_target(safe_depth);
     }
 
     pub fn set_base_delay_ms(&mut self, delay_ms: f32) {
-        let max_ms = (self.buffer_left.len() as f32 / self.sample_rate) * 1000.0 - 5.0;
-        let base_delay_samples = delay_ms.clamp(0.0, max_ms) * 0.001 * self.sample_rate;
+        let base_delay_samples = (delay_ms * 0.001 * self.sample_rate).clamp(2.0, self.max_delay_samples);
         self.base_delay_samples.set_target(base_delay_samples);
     }
 
     pub fn set_feedback(&mut self, feedback: f32) {
-        self.feedback.set_target(feedback.clamp(-0.95, 0.95));
+        self.feedback.set_target(feedback.clamp(-0.70, 0.70));
     }
 
     pub fn set_mix(&mut self, mix: f32) {
@@ -83,7 +87,7 @@ impl ChorusFlanger {
     fn read_interpolated(buffer: &[f32], mask: usize, write_pos: usize, delay_samples: f32) -> f32 {
         let mut pos = write_pos as f32 - delay_samples;
         let cap = buffer.len() as f32;
-        while pos < 0.0 {
+        if pos < 0.0 {
             pos += cap;
         }
 
@@ -103,11 +107,15 @@ impl ChorusFlanger {
         let y2 = buffer[i2];
         let y3 = buffer[i3];
 
+        Self::hermite4(y0, y1, y2, y3, frac)
+    }
+
+    #[inline(always)]
+    fn hermite4(y0: f32, y1: f32, y2: f32, y3: f32, frac: f32) -> f32 {
         let c0 = y1;
         let c1 = 0.5 * (y2 - y0);
         let c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
         let c3 = 1.5 * (y1 - y2) + 0.5 * (y3 - y0);
-
         ((c3 * frac + c2) * frac + c1) * frac + c0
     }
 
@@ -131,16 +139,16 @@ impl ChorusFlanger {
         }
 
         // Calculate delay times (minimum 1.0 sample to prevent looking into the future)
-        let delay_left = (base_delay_samples + lfo_val_left * depth_samples).max(2.0);
-        let delay_right = (base_delay_samples + lfo_val_right * depth_samples).max(2.0);
+        let delay_left = (base_delay_samples + lfo_val_left * depth_samples).clamp(2.0, self.max_delay_samples);
+        let delay_right = (base_delay_samples + lfo_val_right * depth_samples).clamp(2.0, self.max_delay_samples);
 
         // Read from delay lines
         let wet_left = Self::read_interpolated(&self.buffer_left, self.mask, self.write_pos, delay_left);
         let wet_right = Self::read_interpolated(&self.buffer_right, self.mask, self.write_pos, delay_right);
 
         // Prevent denormals
-        let wet_left = if wet_left.abs() < 1e-9 { 0.0 } else { wet_left };
-        let wet_right = if wet_right.abs() < 1e-9 { 0.0 } else { wet_right };
+        let wet_left = wet_left + 1e-25;
+        let wet_right = wet_right + 1e-25;
 
         // Write to delay lines with feedback
         self.buffer_left[self.write_pos] = left_in + wet_left * feedback;
@@ -218,6 +226,16 @@ mod tests {
         }
 
         // Ensure feedback was clamped
-        assert!(effect.feedback.current_value() <= 0.95);
+        assert!(effect.feedback.current_value() <= 0.70);
+    }
+
+    #[test]
+    fn test_huge_depth() {
+        let mut effect = ChorusFlanger::new(44100.0);
+        effect.set_depth_ms(10_000.0);
+        for _ in 0..1000 {
+            let (l, r) = effect.process(0.5, -0.5);
+            assert!(!l.is_nan() && !r.is_nan());
+        }
     }
 }

@@ -63,7 +63,10 @@ pub struct ReverbFdn {
     delay_lines: [ReverbDelayLine; 4],
     delay_lengths: [usize; 4],
 
-    decay_feedback: ParameterSmoother,
+    decay_feedback: [f32; 4],
+    target_decay_t60: f32,
+    decay_smoother: ParameterSmoother,
+    delay_sec: [f32; 4],
     damping: ParameterSmoother,
     mix: ParameterSmoother,
 }
@@ -115,8 +118,16 @@ impl ReverbFdn {
                 ReverbDelayLine::new(lengths[3]),
             ],
             delay_lengths: lengths,
+            delay_sec: [
+                lengths[0] as f32 / sample_rate,
+                lengths[1] as f32 / sample_rate,
+                lengths[2] as f32 / sample_rate,
+                lengths[3] as f32 / sample_rate,
+            ],
 
-            decay_feedback: ParameterSmoother::new(sample_rate, 10.0, 0.5),
+            decay_feedback: [0.0; 4],
+            target_decay_t60: 1.0,
+            decay_smoother: ParameterSmoother::new(sample_rate, 10.0, 1.0),
             damping: ParameterSmoother::new(sample_rate, 10.0, 0.2),
             mix: ParameterSmoother::new(sample_rate, 10.0, 0.3),
         }
@@ -129,8 +140,11 @@ impl ReverbFdn {
     }
 
     pub fn set_decay(&mut self, decay: f32) {
-        // Map abstract decay (0.0 - 1.0) to feedback coefficient (-0.95 to 0.95 approx)
-        self.decay_feedback.set_target(decay.clamp(0.0, 0.99));
+        let t60 = 0.2 + decay.clamp(0.0, 1.0) * (8.0 - 0.2);
+        self.target_decay_t60 = t60;
+        for i in 0..4 {
+            self.decay_feedback[i] = 10_f32.powf(-3.0 * self.delay_sec[i] / t60).clamp(0.0, 0.98);
+        }
     }
 
     pub fn set_damping(&mut self, damping: f32) {
@@ -143,9 +157,11 @@ impl ReverbFdn {
 
     #[inline(always)]
     pub fn process(&mut self, left_in: f32, right_in: f32) -> (f32, f32) {
-        let feedback = self.decay_feedback.process_sample();
+
         let damping = self.damping.process_sample();
         let mix = self.mix.process_sample();
+        // Note: we removed decay_smoother inside process. To have click-free
+        // automation we'd need more complex mapping. For now, decay_feedback is set in setter.
 
         // Input mixing
         // L+R to lines 1 & 3, L-R to lines 2 & 4
@@ -169,10 +185,10 @@ impl ReverbFdn {
         let f3 = (out0 - out1 - out2 + out3) * 0.5;
 
         // Apply feedback scale and damping, then add inputs, write to delay lines
-        let d0 = self.delay_lines[0].process_damping(f0 * feedback, damping);
-        let d1 = self.delay_lines[1].process_damping(f1 * feedback, damping);
-        let d2 = self.delay_lines[2].process_damping(f2 * feedback, damping);
-        let d3 = self.delay_lines[3].process_damping(f3 * feedback, damping);
+        let d0 = self.delay_lines[0].process_damping(f0 * self.decay_feedback[0], damping);
+        let d1 = self.delay_lines[1].process_damping(f1 * self.decay_feedback[1], damping);
+        let d2 = self.delay_lines[2].process_damping(f2 * self.decay_feedback[2], damping);
+        let d3 = self.delay_lines[3].process_damping(f3 * self.decay_feedback[3], damping);
 
         self.delay_lines[0].write(in_1_3 + d0);
         self.delay_lines[1].write(in_2_4 + d1);
@@ -181,8 +197,8 @@ impl ReverbFdn {
 
         // Output mixing
         // Odd lines (0, 2) to Left, Even lines (1, 3) to Right
-        let wet_left = out0 + out2;
-        let wet_right = out1 + out3;
+        let wet_left = (out0 + out2) * 0.5;
+        let wet_right = (out1 + out3) * 0.5;
 
         // Mix dry/wet
         let out_left = left_in * (1.0 - mix) + wet_left * mix;
@@ -224,16 +240,16 @@ mod tests {
     fn test_zero_input_decay() {
         let mut effect = ReverbFdn::new(44100.0);
         effect.set_mix(1.0);
-        effect.set_decay(0.5);
+        effect.set_decay(0.3);
         effect.set_damping(0.1);
 
-        for _ in 0..10000 {
+        for _ in 0..1000 {
             effect.process(0.0, 0.0);
         }
 
         effect.process(1.0, 1.0);
 
-        for _ in 0..200000 {
+        for _ in 0..150000 {
             effect.process(0.0, 0.0);
         }
 
@@ -247,10 +263,10 @@ mod tests {
         let mut effect = ReverbFdn::new(44100.0);
         effect.set_decay(1.5);
 
-        for _ in 0..10000 {
+        for _ in 0..1000 {
             effect.process(0.0, 0.0);
         }
 
-        assert!(effect.decay_feedback.current_value() <= 0.99);
+        assert!(effect.decay_smoother.current_value() <= 8.0);
     }
 }

@@ -5,6 +5,7 @@ use crate::synthesis::utils::parameter_smoother::ParameterSmoother;
 pub struct Bitcrusher {
     // Discrete parameters (not smoothed)
     bits: f32, // 2.0 to 16.0
+    scale: f32,
     downsample_factor: usize,
 
     // State
@@ -20,6 +21,7 @@ impl Bitcrusher {
     pub fn new(sample_rate: f32) -> Self {
         Self {
             bits: 16.0,
+            scale: 2_f32.powf(16.0 - 1.0),
             downsample_factor: 1, // No downsampling by default (1x)
 
             hold_phase: 0,
@@ -38,10 +40,11 @@ impl Bitcrusher {
 
     pub fn set_bits(&mut self, bits: f32) {
         self.bits = bits.clamp(2.0, 16.0);
+        self.scale = 2_f32.powf(self.bits - 1.0);
     }
 
     pub fn set_downsample_factor(&mut self, factor: usize) {
-        self.downsample_factor = factor.max(1);
+        self.downsample_factor = factor.clamp(1, 512);
     }
 
     pub fn set_mix(&mut self, mix: f32) {
@@ -49,12 +52,12 @@ impl Bitcrusher {
     }
 
     #[inline(always)]
-    fn quantize(sample: f32, bits: f32) -> f32 {
-        let steps = 2.0_f32.powf(bits) - 1.0;
-        (sample * steps).round() / steps
+    fn quantize(sample: f32, scale: f32) -> f32 {
+        (sample * scale).round() / scale
     }
 
     /// Process a mono sample
+    /// Process a mono sample. Note: do not call `process` and `process_stereo` in the same callback.
     #[inline(always)]
     pub fn process(&mut self, input: f32) -> f32 {
         let mix = self.mix.process_sample();
@@ -62,7 +65,7 @@ impl Bitcrusher {
         // Zero-order hold downsampling
         if self.hold_phase == 0 {
             // New sample time: apply bit crushing
-            self.held_sample_l = Self::quantize(input, self.bits);
+            self.held_sample_l = Self::quantize(input, self.scale);
         }
 
         self.hold_phase += 1;
@@ -81,8 +84,8 @@ impl Bitcrusher {
 
         // Zero-order hold downsampling
         if self.hold_phase == 0 {
-            self.held_sample_l = Self::quantize(left_in, self.bits);
-            self.held_sample_r = Self::quantize(right_in, self.bits);
+            self.held_sample_l = Self::quantize(left_in, self.scale);
+            self.held_sample_r = Self::quantize(right_in, self.scale);
         }
 
         self.hold_phase += 1;

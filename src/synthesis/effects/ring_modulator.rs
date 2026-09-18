@@ -103,7 +103,6 @@ impl RingModulator {
     #[inline(always)]
     pub fn process_with_carrier(&mut self, input: f32, carrier: f32) -> f32 {
         // Still need to step the smoothers
-        self.carrier_freq.process_sample(); // Ignored in this mode
         let mix = self.mix.process_sample();
 
         let wet = input * carrier;
@@ -114,7 +113,6 @@ impl RingModulator {
     #[inline(always)]
     pub fn process_stereo_with_carrier(&mut self, left_in: f32, right_in: f32, carrier_l: f32, carrier_r: f32) -> (f32, f32) {
         // Still need to step the smoothers
-        self.carrier_freq.process_sample(); // Ignored in this mode
         let mix = self.mix.process_sample();
 
         let wet_l = left_in * carrier_l;
@@ -130,6 +128,15 @@ impl RingModulator {
     pub fn process_block(&mut self, input: &[f32], output: &mut [f32]) {
         for (i, o) in input.iter().zip(output.iter_mut()) {
             *o = self.process(*i);
+        }
+    }
+
+    #[inline]
+    pub fn process_block_stereo(&mut self, left_in: &[f32], right_in: &[f32], left_out: &mut [f32], right_out: &mut [f32]) {
+        for (((l_in, r_in), l_out), r_out) in left_in.iter().zip(right_in.iter()).zip(left_out.iter_mut()).zip(right_out.iter_mut()) {
+            let (l, r) = self.process_stereo(*l_in, *r_in);
+            *l_out = l;
+            *r_out = r;
         }
     }
 }
