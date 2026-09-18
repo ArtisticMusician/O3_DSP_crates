@@ -31,7 +31,7 @@ impl OscillatorModule {
             OscillatorModule::Wavetable(osc) => osc.process_sample(),
             OscillatorModule::Fm(osc) => osc.next_sample(0.0), // default empty pm
             OscillatorModule::KarplusStrong(osc) => osc.next_sample(),
-            OscillatorModule::Supersaw(osc) => osc.next_sample().0, // default mono out
+            OscillatorModule::Supersaw(osc) => osc.next_sample(), // default mono out
         }
     }
 }
