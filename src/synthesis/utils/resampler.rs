@@ -116,6 +116,9 @@ mod tests {
             let _ = r.next_output(&mut next);
         }
         // Prime 4 + ~2 per output after the first few.
-        assert!(consumed > 16, "expected downsample to pull extra inputs, got {consumed}");
+        assert!(
+            consumed > 16,
+            "expected downsample to pull extra inputs, got {consumed}"
+        );
     }
 }
