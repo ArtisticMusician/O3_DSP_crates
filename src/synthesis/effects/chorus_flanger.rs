@@ -1,4 +1,5 @@
 use crate::synthesis::math_utils::TWO_PI;
+use crate::synthesis::utils::hermite_interpolator::HermiteInterpolator;
 use crate::synthesis::utils::parameter_smoother::ParameterSmoother;
 
 /// Modulated delay line used for Chorus and Flanger effects.
@@ -61,14 +62,22 @@ impl ChorusFlanger {
 
     pub fn set_depth_ms(&mut self, depth_ms: f32) {
         let depth_samples = (depth_ms * 0.001 * self.sample_rate).max(0.0);
-        let base = self.base_delay_samples.current_value();
-        let safe_depth = depth_samples.min(self.max_delay_samples - base);
+        let target_base = self.base_delay_samples.target;
+        let safe_depth = depth_samples.max(0.0).min(self.max_delay_samples - target_base).max(0.0);
         self.depth_samples.set_target(safe_depth);
+        // Re-clamp base just in case
+        let safe_base = target_base.clamp(2.0, self.max_delay_samples - safe_depth);
+        self.base_delay_samples.set_target(safe_base);
     }
 
     pub fn set_base_delay_ms(&mut self, delay_ms: f32) {
         let base_delay_samples = (delay_ms * 0.001 * self.sample_rate).clamp(2.0, self.max_delay_samples);
-        self.base_delay_samples.set_target(base_delay_samples);
+        let target_depth = self.depth_samples.target;
+        let safe_base = base_delay_samples.clamp(2.0, self.max_delay_samples - target_depth);
+        self.base_delay_samples.set_target(safe_base);
+        // Re-clamp depth just in case
+        let safe_depth = target_depth.max(0.0).min(self.max_delay_samples - safe_base).max(0.0);
+        self.depth_samples.set_target(safe_depth);
     }
 
     pub fn set_feedback(&mut self, feedback: f32) {
@@ -107,17 +116,10 @@ impl ChorusFlanger {
         let y2 = buffer[i2];
         let y3 = buffer[i3];
 
-        Self::hermite4(y0, y1, y2, y3, frac)
+        HermiteInterpolator::interpolate(y0, y1, y2, y3, frac)
     }
 
-    #[inline(always)]
-    fn hermite4(y0: f32, y1: f32, y2: f32, y3: f32, frac: f32) -> f32 {
-        let c0 = y1;
-        let c1 = 0.5 * (y2 - y0);
-        let c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
-        let c3 = 1.5 * (y1 - y2) + 0.5 * (y3 - y0);
-        ((c3 * frac + c2) * frac + c1) * frac + c0
-    }
+
 
     #[inline(always)]
     pub fn process(&mut self, left_in: f32, right_in: f32) -> (f32, f32) {

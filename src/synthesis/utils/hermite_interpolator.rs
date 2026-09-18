@@ -10,6 +10,15 @@ impl HermiteInterpolator {
         Self { buffer: [0.0; 4] }
     }
 
+    #[inline(always)]
+    pub fn interpolate(y0: f32, y1: f32, y2: f32, y3: f32, frac: f32) -> f32 {
+        let c0 = y1;
+        let c1 = 0.5 * (y2 - y0);
+        let c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+        let c3 = 1.5 * (y1 - y2) + 0.5 * (y3 - y0);
+        ((c3 * frac + c2) * frac + c1) * frac + c0
+    }
+
     /// Push a new sample into the history buffer.
     #[inline(always)]
     pub fn push_sample(&mut self, sample: f32) {
