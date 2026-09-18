@@ -25,7 +25,9 @@ pub struct Chorus {
 
 impl Chorus {
     pub fn new(sample_rate: f32) -> Self {
-        let capacity = ((0.040 * sample_rate).ceil() as usize).max(16).next_power_of_two();
+        let capacity = ((0.040 * sample_rate).ceil() as usize)
+            .max(16)
+            .next_power_of_two();
         let mut this = Self {
             buffer: vec![0.0; capacity],
             mask: capacity - 1,
