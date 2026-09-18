@@ -1,5 +1,4 @@
 use crate::synthesis::math_utils::{db_to_linear_approx, linear_to_db_approx};
-use crate::synthesis::utils::parameter_smoother::ParameterSmoother;
 
 /// Downward expander / noise gate featuring adjustable threshold, ratio,
 /// hysteresis to prevent chatter, attack, hold, and release envelopes.
@@ -12,6 +11,7 @@ pub struct GateExpander {
 
     attack_coef: f32,
     release_coef: f32,
+    fast_coef: f32,
 
     hold_ms: f32,
     hold_samples: usize,
@@ -20,7 +20,7 @@ pub struct GateExpander {
     envelope: f32,
     is_open: bool,
 
-    gain_smoother: ParameterSmoother,
+    gain: f32,
 }
 
 impl GateExpander {
@@ -33,6 +33,7 @@ impl GateExpander {
 
             attack_coef: 0.0,
             release_coef: 0.0,
+            fast_coef: (-1.0 / (0.001 * sample_rate)).exp(),
 
             hold_ms: 10.0,
             hold_samples: 0,
@@ -41,7 +42,7 @@ impl GateExpander {
             envelope: 0.0,
             is_open: false,
 
-            gain_smoother: ParameterSmoother::new(sample_rate, 5.0, 1.0),
+            gain: 0.0,
         };
         gate.set_attack_ms(1.0);
         gate.set_release_ms(100.0);
@@ -53,7 +54,7 @@ impl GateExpander {
         self.envelope = 0.0;
         self.is_open = false;
         self.hold_counter = 0;
-        self.gain_smoother.reset(1.0);
+        self.gain = 0.0;
     }
 
     pub fn set_threshold_db(&mut self, threshold_db: f32) {
@@ -65,17 +66,10 @@ impl GateExpander {
     }
 
     pub fn set_ratio(&mut self, ratio: f32) {
-        // Ratio >= 1.0. High ratios approach hard gating.
-        self.ratio = ratio.max(1.0);
+        self.ratio = ratio.clamp(1.0, 100.0);
     }
 
     pub fn set_attack_ms(&mut self, ms: f32) {
-        // Attack/release are applied via the sidechain envelope or gain smoother.
-        // We'll use the sidechain envelope for instant tracking, but the gain smoother
-        // to handle the actual gain fade-in/fade-out smoothly.
-        // So let's make the gain smoother track attack/release.
-        self.gain_smoother.set_time(self.sample_rate, ms.max(0.1));
-
         let time_sec = (ms * 0.001).max(1e-4);
         self.attack_coef = (-1.0 / (time_sec * self.sample_rate)).exp();
     }
@@ -94,16 +88,10 @@ impl GateExpander {
     pub fn process_sample(&mut self, left: f32, right: f32) -> (f32, f32) {
         let peak = left.abs().max(right.abs());
 
-        // For the sidechain, we want near instant tracking of the level
-        // so that the threshold calculation is accurate to the current signal,
-        // and we apply attack/release to the *gain reduction* instead.
-        // However, a tiny bit of smoothing on the peak detection is good to prevent jitter.
-        // We'll use a fast 1ms smoothing for the peak envelope itself.
-        let fast_coef = (-1.0 / (0.001 * self.sample_rate)).exp();
         if peak > self.envelope {
-            self.envelope = peak; // Instant attack for sidechain
+            self.envelope = peak;
         } else {
-            self.envelope = fast_coef * self.envelope + (1.0 - fast_coef) * peak; // fast release
+            self.envelope = self.fast_coef * self.envelope + (1.0 - self.fast_coef) * peak;
         }
 
         let envelope_db = linear_to_db_approx(self.envelope);
@@ -146,21 +134,13 @@ impl GateExpander {
 
         let target_gain_lin = db_to_linear_approx(target_gain_db);
 
-        // Apply attack/release to the gain envelope
-        if target_gain_lin > self.gain_smoother.current_value() {
-            // Gain is increasing (gate opening), so we use the attack time.
-            // Since we removed set_time from the audio loop, we can just manually apply it.
-            let cur = self.gain_smoother.current_value();
-            let new_val = self.attack_coef * cur + (1.0 - self.attack_coef) * target_gain_lin;
-            self.gain_smoother.reset(new_val);
+        if target_gain_lin > self.gain {
+            self.gain = self.attack_coef * self.gain + (1.0 - self.attack_coef) * target_gain_lin;
         } else {
-            // Gain is decreasing (gate closing/expanding), use release time
-            let cur = self.gain_smoother.current_value();
-            let new_val = self.release_coef * cur + (1.0 - self.release_coef) * target_gain_lin;
-            self.gain_smoother.reset(new_val);
+            self.gain = self.release_coef * self.gain + (1.0 - self.release_coef) * target_gain_lin;
         }
 
-        let gain = self.gain_smoother.current_value();
+        let gain = self.gain;
         (left * gain, right * gain)
     }
 
@@ -200,26 +180,66 @@ mod tests {
     }
 
     #[test]
+    fn starts_closed() {
+        let mut gate = GateExpander::new(48_000.0);
+        gate.set_threshold_db(-10.0);
+        gate.set_ratio(100.0);
+
+        let (l, r) = gate.process_sample(0.01, 0.01);
+        assert!(l.abs() < 0.001);
+        assert!(r.abs() < 0.001);
+    }
+
+    #[test]
     fn gates_quiet_signal() {
         let mut gate = GateExpander::new(48_000.0);
         gate.set_threshold_db(-10.0);
-        gate.set_ratio(100.0); // Hard gate
+        gate.set_ratio(100.0);
 
-        // Wait, default is open because gain_smoother is initialized to 1.0.
-        // We must process enough samples to let the release completely close the gate
-        // Since release is default 100ms and attack is 1ms.
-        gate.set_release_ms(1.0); // Make it fast for the test
-
-        // A signal of 0.01 is -40 dB, well below -10 dB threshold
-        // Give it 10,000 samples to fully release
-        for _ in 0..10_000 {
+        for _ in 0..1000 {
             gate.process_sample(0.01, 0.01);
         }
 
         let (l, r) = gate.process_sample(0.01, 0.01);
-
-        // Should be heavily attenuated
         assert!(l.abs() < 0.001);
         assert!(r.abs() < 0.001);
+    }
+
+    #[test]
+    fn ratio_1_is_unity() {
+        let mut gate = GateExpander::new(48_000.0);
+        gate.set_threshold_db(-10.0);
+        gate.set_ratio(1.0);
+
+        for _ in 0..1000 {
+            gate.process_sample(0.01, 0.01);
+        }
+
+        let (l, r) = gate.process_sample(0.01, 0.01);
+        assert!((l - 0.01).abs() < 1e-4);
+        assert!((r - 0.01).abs() < 1e-4);
+    }
+
+    #[test]
+    fn hysteresis() {
+        let mut gate = GateExpander::new(48_000.0);
+        gate.set_threshold_db(-10.0);
+        gate.set_hysteresis_db(5.0);
+        gate.set_hold_ms(10.0);
+        gate.set_ratio(100.0);
+
+        // Open gate fully
+        for _ in 0..1000 {
+            gate.process_sample(1.0, 1.0);
+        }
+
+        // Drop into hysteresis region (-12dB is between -10 and -15)
+        let signal = 0.25; // approx -12dB
+        for _ in 0..100 {
+            gate.process_sample(signal, signal);
+        }
+
+        let (l, _r) = gate.process_sample(signal, signal);
+        assert!((l - signal).abs() < 1e-2, "Gate should still be fully open in hysteresis hold region");
     }
 }

@@ -35,17 +35,13 @@ impl RmsMeter {
         self.running_sum_of_squares = 0.0;
     }
 
+    /// Note: This recalculates the internal buffer and should only be called
+    /// at control-rate, not within the audio thread per-sample.
     pub fn set_window_ms(&mut self, ms: f32) {
         self.window_ms = ms.clamp(1.0, 1000.0);
         self.window_samples = (self.window_ms * 0.001 * self.sample_rate).ceil() as usize;
-        // Clamp in case of floating point precision edge cases
         self.window_samples = self.window_samples.min(self.buffer.len());
 
-        // Changing window requires recalculating the running sum to prevent glitches,
-        // but for simplicity in real-time context, if window size changes we might just want to let it adapt
-        // or fully clear. Since it's a meter, adapting over window time is usually fine.
-        // We will just let the read pointer change and sum drift temporarily, or clear it.
-        // To be perfectly robust against drift when window changes, we recalculate from buffer.
         self.recalculate_sum();
     }
 
@@ -58,7 +54,6 @@ impl RmsMeter {
             } else {
                 idx - 1
             };
-            // The buffer already holds squared values
             sum += self.buffer[idx];
         }
         self.running_sum_of_squares = sum;
@@ -68,27 +63,25 @@ impl RmsMeter {
     pub fn process_sample(&mut self, sample: f32) {
         let squared = sample * sample;
 
-        // Oldest sample in the window that we are replacing/removing from sum
         let read_idx =
             (self.write_idx + self.buffer.len() - self.window_samples) % self.buffer.len();
         let oldest_squared = self.buffer[read_idx];
-        self.buffer[read_idx] = oldest_squared; // This line seems redundant but we actually want to read it.
-                                                // Wait, the buffer stores the squared values or raw values?
-                                                // Let's store squared values directly to save a multiplication on read.
 
-        // Remove oldest from sum, add newest
         self.running_sum_of_squares -= oldest_squared;
         self.running_sum_of_squares += squared;
 
-        // To prevent floating point drift over long periods, occasionally recalculate or clamp
         if self.running_sum_of_squares < 0.0 {
             self.running_sum_of_squares = 0.0;
         }
 
-        // Store new squared value in buffer
         self.buffer[self.write_idx] = squared;
 
         self.write_idx = (self.write_idx + 1) % self.buffer.len();
+    }
+
+    #[inline(always)]
+    pub fn process_stereo(&mut self, l: f32, r: f32) {
+        self.process_sample(l.abs().max(r.abs()));
     }
 
     #[inline(always)]
@@ -134,7 +127,30 @@ mod tests {
         }
 
         let rms_db = meter.get_rms_db();
-        // Should be very close to -3.01 dB
         assert!((rms_db - (-3.01)).abs() < 0.1, "RMS dB was {}", rms_db);
+    }
+
+    #[test]
+    fn dc_one_is_zero_db() {
+        let mut meter = RmsMeter::new(48_000.0);
+        meter.set_window_ms(100.0);
+
+        for _ in 0..4800 {
+            meter.process_sample(1.0);
+        }
+
+        assert!((meter.get_rms_db() - 0.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn silence_is_minus_144() {
+        let mut meter = RmsMeter::new(48_000.0);
+        meter.set_window_ms(100.0);
+
+        for _ in 0..4800 {
+            meter.process_sample(0.0);
+        }
+
+        assert_eq!(meter.get_rms_db(), -144.0);
     }
 }

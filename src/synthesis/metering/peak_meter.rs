@@ -5,6 +5,7 @@ use crate::synthesis::math_utils::linear_to_db_approx;
 pub struct PeakMeter {
     sample_rate: f32,
     decay_rate_db_per_sec: f32,
+    decay_factor: f32,
     peak_linear: f32,
 }
 
@@ -13,6 +14,7 @@ impl PeakMeter {
         let mut meter = Self {
             sample_rate,
             decay_rate_db_per_sec: 20.0,
+            decay_factor: 1.0,
             peak_linear: 0.0,
         };
         meter.set_decay_rate(20.0);
@@ -25,6 +27,8 @@ impl PeakMeter {
 
     pub fn set_decay_rate(&mut self, db_per_sec: f32) {
         self.decay_rate_db_per_sec = db_per_sec.max(0.0);
+        self.decay_factor =
+            10.0_f32.powf(-self.decay_rate_db_per_sec / (20.0 * self.sample_rate));
     }
 
     #[inline(always)]
@@ -34,25 +38,18 @@ impl PeakMeter {
         if abs_sample >= self.peak_linear {
             self.peak_linear = abs_sample;
         } else {
-            // Decay peak_linear to match db_per_sec
-            // To decay in dB linearly, we could do log conversions each sample,
-            // but for performance we can calculate an exponential decay factor
-            // that approximates linear dB decay at the current level.
-            // A more exact but slightly more expensive way is:
-            // current_db = linear_to_db(self.peak_linear)
-            // current_db -= self.decay_rate_db_per_sec / self.sample_rate
-            // self.peak_linear = db_to_linear(current_db)
-
-            // For true linear dB decay:
-            let decay_factor =
-                10.0_f32.powf(-self.decay_rate_db_per_sec / (20.0 * self.sample_rate));
-            self.peak_linear *= decay_factor;
+            self.peak_linear *= self.decay_factor;
 
             // Prevent denormals
             if self.peak_linear < 1e-6 {
                 self.peak_linear = 0.0;
             }
         }
+    }
+
+    #[inline(always)]
+    pub fn process_stereo(&mut self, l: f32, r: f32) {
+        self.process_sample(l.abs().max(r.abs()));
     }
 
     #[inline(always)]
