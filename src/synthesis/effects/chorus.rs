@@ -94,7 +94,7 @@ impl Chorus {
     fn read_at(&self, delay_samples: f32) -> f32 {
         let mut pos = self.write as f32 - delay_samples;
         let cap = self.buffer.len() as f32;
-        while pos < 0.0 {
+        if pos < 0.0 {
             pos += cap;
         }
         let i0 = pos.floor() as usize;
@@ -112,7 +112,7 @@ impl Processor for Chorus {
         let n = self.voices;
         for v in 0..n {
             let lfo = (self.phase[v] * TWO_PI).sin();
-            let delay = (self.base_delay_samples + lfo * self.depth_samples).max(1.0);
+            let delay = (self.base_delay_samples + lfo * self.depth_samples).clamp(1.0, self.buffer.len() as f32 - 3.0);
             wet += self.read_at(delay);
             self.phase[v] += self.phase_inc[v];
             if self.phase[v] >= 1.0 {
@@ -125,5 +125,18 @@ impl Processor for Chorus {
         self.write = (self.write + 1) & self.mask;
 
         input * (1.0 - self.mix) + wet * self.mix
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_huge_depth() {
+        let mut effect = Chorus::new(44100.0);
+        effect.set_base_delay_ms(100.0);
+        effect.set_depth_ms(12.0);
+        let out = effect.process_sample(0.5);
+        assert!(!out.is_nan());
     }
 }
