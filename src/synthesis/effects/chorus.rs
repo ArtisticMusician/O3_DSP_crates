@@ -125,3 +125,16 @@ impl Processor for Chorus {
         input * (1.0 - self.mix) + wet * self.mix
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_huge_depth() {
+        let mut effect = Chorus::new(44100.0);
+        effect.set_base_delay_ms(100.0);
+        effect.set_depth_ms(12.0);
+        let out = effect.process_sample(0.5);
+        assert!(!out.is_nan());
+    }
+}

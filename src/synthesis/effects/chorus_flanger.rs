@@ -62,7 +62,7 @@ impl ChorusFlanger {
 
     pub fn set_depth_ms(&mut self, depth_ms: f32) {
         let depth_samples = (depth_ms * 0.001 * self.sample_rate).max(0.0);
-        let target_base = self.base_delay_samples.target;
+        let target_base = self.base_delay_samples.current_value();
         let safe_depth = depth_samples.max(0.0).min(self.max_delay_samples - target_base).max(0.0);
         self.depth_samples.set_target(safe_depth);
         // Re-clamp base just in case
@@ -72,7 +72,7 @@ impl ChorusFlanger {
 
     pub fn set_base_delay_ms(&mut self, delay_ms: f32) {
         let base_delay_samples = (delay_ms * 0.001 * self.sample_rate).clamp(2.0, self.max_delay_samples);
-        let target_depth = self.depth_samples.target;
+        let target_depth = self.depth_samples.current_value();
         let safe_base = base_delay_samples.clamp(2.0, self.max_delay_samples - target_depth);
         self.base_delay_samples.set_target(safe_base);
         // Re-clamp depth just in case

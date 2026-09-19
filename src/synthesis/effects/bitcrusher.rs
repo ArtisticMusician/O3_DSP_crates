@@ -4,7 +4,6 @@ use crate::synthesis::utils::parameter_smoother::ParameterSmoother;
 #[derive(Debug, Clone)]
 pub struct Bitcrusher {
     // Discrete parameters (not smoothed)
-    bits: f32, // 2.0 to 16.0
     scale: f32,
     downsample_factor: usize,
 
@@ -20,7 +19,6 @@ pub struct Bitcrusher {
 impl Bitcrusher {
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            bits: 16.0,
             scale: 2_f32.powf(16.0 - 1.0),
             downsample_factor: 1, // No downsampling by default (1x)
 
@@ -39,8 +37,7 @@ impl Bitcrusher {
     }
 
     pub fn set_bits(&mut self, bits: f32) {
-        self.bits = bits.clamp(2.0, 16.0);
-        self.scale = 2_f32.powf(self.bits - 1.0);
+        self.scale = 2_f32.powf(bits.clamp(2.0, 16.0) - 1.0);
     }
 
     pub fn set_downsample_factor(&mut self, factor: usize) {

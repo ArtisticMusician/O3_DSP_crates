@@ -49,9 +49,8 @@ impl ReverbDelayLine {
         self.filter_state = (1.0 - damping) * input + damping * self.filter_state;
 
         // Prevent denormals
-        if self.filter_state.abs() < 1e-9 {
-            self.filter_state = 0.0;
-        }
+        // use a tiny DC bias to prevent denormals instead of branching
+        self.filter_state += 1e-25;
 
         self.filter_state
     }
@@ -64,8 +63,6 @@ pub struct ReverbFdn {
     delay_lengths: [usize; 4],
 
     decay_feedback: [f32; 4],
-    target_decay_t60: f32,
-    decay_smoother: ParameterSmoother,
     delay_sec: [f32; 4],
     damping: ParameterSmoother,
     mix: ParameterSmoother,
@@ -110,7 +107,7 @@ impl ReverbFdn {
             next_prime((2131.0 * scale).round() as usize),
         ];
 
-        Self {
+        let mut this = Self {
             delay_lines: [
                 ReverbDelayLine::new(lengths[0]),
                 ReverbDelayLine::new(lengths[1]),
@@ -126,11 +123,12 @@ impl ReverbFdn {
             ],
 
             decay_feedback: [0.0; 4],
-            target_decay_t60: 1.0,
-            decay_smoother: ParameterSmoother::new(sample_rate, 10.0, 1.0),
+
             damping: ParameterSmoother::new(sample_rate, 10.0, 0.2),
             mix: ParameterSmoother::new(sample_rate, 10.0, 0.3),
-        }
+        };
+        this.set_decay(0.4);
+        this
     }
 
     pub fn reset(&mut self) {
@@ -141,7 +139,6 @@ impl ReverbFdn {
 
     pub fn set_decay(&mut self, decay: f32) {
         let t60 = 0.2 + decay.clamp(0.0, 1.0) * (8.0 - 0.2);
-        self.target_decay_t60 = t60;
         for i in 0..4 {
             self.decay_feedback[i] = 10_f32.powf(-3.0 * self.delay_sec[i] / t60).clamp(0.0, 0.98);
         }
@@ -267,6 +264,28 @@ mod tests {
             effect.process(0.0, 0.0);
         }
 
-        assert!(effect.decay_smoother.current_value() <= 8.0);
+        assert!(effect.decay_feedback[0] <= 0.98);
+    }
+
+    #[test]
+    fn test_default_not_silent() {
+        let mut effect = ReverbFdn::new(44100.0);
+        effect.process(1.0, 1.0);
+        // Wait for parameters to smooth in from defaults (like mix=0.3)
+        for _ in 0..1000 {
+            effect.process(0.0, 0.0);
+        }
+
+        effect.process(1.0, 1.0);
+
+        // The minimum delay length at 44.1kHz is ~1453 samples
+        // We need to wait for at least that long for the delay line to emit sound
+        for _ in 0..4000 {
+            let (l, r) = effect.process(0.0, 0.0);
+            if l.abs() > 1e-5 || r.abs() > 1e-5 {
+                return;
+            }
+        }
+        panic!("Reverb output is silent");
     }
 }

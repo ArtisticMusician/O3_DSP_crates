@@ -1,7 +1,7 @@
 /// A generic parameter smoother to avoid zipper noise when modulating parameters.
 #[derive(Debug, Clone, Copy)]
 pub struct ParameterSmoother {
-    pub target: f32,
+    target: f32,
     current: f32,
     coef: f32,
 }

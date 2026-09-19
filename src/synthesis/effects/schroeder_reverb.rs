@@ -112,6 +112,7 @@ mod tests {
             for _ in 0..512 {
                 acc += r.process_sample(0.0).abs();
             }
+            // test allows some bouncing inside feedback loops
             assert!(acc <= last * 3.0 + 1e-2, "energy grew: {acc} vs {last}");
             last = acc;
         }
