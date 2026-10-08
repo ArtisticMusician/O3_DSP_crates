@@ -1,17 +1,23 @@
 pub mod chorus;
 pub mod chorus_flanger;
 pub mod delay;
+pub mod phase_shifter;
 pub mod saturation;
 pub mod schroeder_reverb;
 pub mod reverb_fdn;
 pub mod ring_modulator;
 pub mod bitcrusher;
+pub mod wavefolder;
+pub mod stereo_width;
 
 pub use chorus::Chorus;
 pub use chorus_flanger::ChorusFlanger;
 pub use delay::MonoFeedbackDelay;
+pub use phase_shifter::{Phaser, PhaserModulation};
 pub use saturation::{Saturation, SaturationMode};
 pub use schroeder_reverb::SchroederReverb;
 pub use reverb_fdn::ReverbFdn;
 pub use ring_modulator::{RingModulator, CarrierShape};
 pub use bitcrusher::Bitcrusher;
+pub use wavefolder::{Wavefolder, WavefolderType};
+pub use stereo_width::StereoWidth;

@@ -38,6 +38,11 @@ impl AllpassFilter {
         self.write = 0;
     }
 
+    /// Get current delay in samples
+    pub fn delay_samples(&self) -> usize {
+        self.delay_samples
+    }
+
     #[inline(always)]
     pub fn process(&mut self, input: f32) -> f32 {
         let read = (self.write + self.buffer.len() - self.delay_samples) & self.mask;

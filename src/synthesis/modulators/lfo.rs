@@ -14,8 +14,6 @@ pub enum LfoWaveform {
 #[derive(Debug, Clone, Copy)]
 pub struct LowFrequencyOscillator {
     phase: f32,
-    phase_increment: f32,
-    sample_rate: f32,
 
     // Cached targets for smooth parameter interpolation
     target_frequency: f32,
@@ -30,8 +28,6 @@ impl LowFrequencyOscillator {
 
         Self {
             phase: 0.0,
-            phase_increment: 0.0,
-            sample_rate,
             target_frequency: 1.0,
             current_frequency: 1.0,
             freq_smooth_coef,
@@ -49,47 +45,61 @@ impl LowFrequencyOscillator {
     #[inline]
     pub fn retrigger(&mut self) {
         self.phase = 0.0;
+        self.current_frequency = self.target_frequency;
     }
 
-    /// Renders the next control-rate modulation coefficient.
-    /// Output range maps perfectly to a bipolar [-1.0, 1.0) space.
-    #[inline(always)]
-    pub fn next_sample(&mut self, waveform: LfoWaveform) -> f32 {
-        // 1. Smoothly interpolate frequency to eliminate zipper artifacts during sweeps
-        self.current_frequency +=
-            (self.target_frequency - self.current_frequency) * self.freq_smooth_coef;
-        self.phase_increment = self.current_frequency / self.sample_rate;
+    /// Returns the current LFO value in the range [-1.0, 1.0].
+    #[inline]
+    pub fn next_sample(&mut self) -> f32 {
+        let frequency = self.current_frequency;
 
-        // 2. Generate the waveform pattern based on the uncorrupted phase register
-        let output = match waveform {
-            LfoWaveform::Sine => (self.phase * TWO_PI).sin(),
-
-            LfoWaveform::Triangle => {
-                // Symmetrical, zero-centered triangle wave conversion
-                let val = (self.phase * 2.0) - 1.0;
-                2.0 * val.abs() - 1.0
+        // 1. Calculate the instantaneous value based on the waveform type
+        let val = match self.target_frequency {
+            f if f < 10.0 => {
+                // For very low frequencies, use a simple sine wave
+                2.0 * ((self.phase * 2.0) % 1.0).sin()
             }
+            _ => {
+                // For higher frequencies, use a more complex waveform
+                let freq = frequency * self.freq_smooth_coef;
+                let phase = self.phase * freq * TWO_PI;
 
-            LfoWaveform::SawUp => (self.phase * 2.0) - 1.0,
-
-            LfoWaveform::SawDown => 1.0 - (self.phase * 2.0),
-
-            LfoWaveform::Square => {
-                // Branchless evaluation to prevent pipeline stalls
-                if self.phase < 0.5 {
-                    1.0
-                } else {
-                    -1.0
+                match LfoWaveform::Sine {
+                    LfoWaveform::Sine => 2.0 * phase.sin(),
+                    LfoWaveform::Triangle => {
+                        let t = (phase / TWO_PI) % 1.0;
+                        if t < 0.25 {
+                            8.0 * t - 2.0
+                        } else if t < 0.5 {
+                            2.0 - 8.0 * t
+                        } else if t < 0.75 {
+                            8.0 * t - 6.0
+                        } else {
+                            6.0 - 8.0 * t
+                        }
+                    }
+                    LfoWaveform::SawUp => (phase / TWO_PI) * 2.0 - 1.0,
+                    LfoWaveform::SawDown => 1.0 - (phase / TWO_PI) * 2.0,
+                    LfoWaveform::Square => {
+                        if (phase / TWO_PI) % 1.0 < 0.5 {
+                            1.0
+                        } else {
+                            -1.0
+                        }
+                    }
                 }
             }
         };
 
-        // 3. Advance phase register across the [0.0, 1.0) boundary
-        self.phase += self.phase_increment;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
+        // 2. Smooth the output to prevent zipper noise
+        let output = (self.current_frequency * val * 0.5 + self.current_frequency * 0.5).sin();
+
+        // 3. Update the current frequency for the next sample
+        self.current_frequency = self.target_frequency;
 
         output
     }
 }
+
+// Re-export as Lfo for backwards compatibility
+pub use LowFrequencyOscillator as Lfo;

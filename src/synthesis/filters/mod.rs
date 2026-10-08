@@ -9,7 +9,13 @@ pub mod ladder_filter_impl;
 pub mod moog_ladder;
 pub mod one_pole;
 pub mod parametric_eq;
+pub mod sallen_key;
+pub mod shelf;
+pub mod linkwitz_riley;
+pub mod formant;
 pub mod state_variable;
+pub mod biquad_bank;
+pub mod diode_ladder;
 
 pub use allpass::AllpassFilter;
 pub use biquad::{BiquadFilter, BiquadType};
@@ -22,7 +28,13 @@ pub use ladder_filter_impl::LadderFilterProcessor;
 pub use moog_ladder::MoogLadderFilter;
 pub use one_pole::OnePoleFilter;
 pub use parametric_eq::ParametricEq;
+pub use sallen_key::{SallenKeyFilter, SallenKeyMode};
+pub use shelf::{ShelfFilter, ShelfMode};
+pub use linkwitz_riley::{LinkwitzRileyCrossover, CrossoverOrder};
+pub use formant::FormantFilter;
 pub use state_variable::{StateVariableFilter, SvfMode};
+pub use biquad_bank::{BiquadBank, GraphicEq};
+pub use diode_ladder::DiodeLadderFilter;
 
 use crate::synthesis::utils::Processor;
 
@@ -39,6 +51,10 @@ pub enum FilterModule {
     Allpass(AllpassFilter),
     CombBank(CombBank),
     AllpassBank(AllpassBank),
+    SallenKey(SallenKeyFilter),
+    Shelf(ShelfFilter),
+    LinkwitzRiley(LinkwitzRileyCrossover),
+    Formant(FormantFilter),
 }
 
 impl Processor for FilterModule {
@@ -55,6 +71,10 @@ impl Processor for FilterModule {
             FilterModule::Allpass(flt) => flt.process(sample),
             FilterModule::CombBank(flt) => flt.process(sample),
             FilterModule::AllpassBank(flt) => flt.process(sample),
+            FilterModule::SallenKey(flt) => flt.process_sample(sample),
+            FilterModule::Shelf(flt) => flt.process_sample(sample),
+            FilterModule::LinkwitzRiley(flt) => flt.process_sample(sample),
+            FilterModule::Formant(flt) => flt.process_sample(sample),
         }
     }
 }

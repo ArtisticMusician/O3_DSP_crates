@@ -23,7 +23,13 @@ impl FirFilter {
             self.history.resize(new_coeffs.len(), 0.0);
         }
         self.coefficients = new_coeffs;
-        self.index = self.index % self.coefficients.len();
+
+        // Empty coefficients make the filter a pass-through; keep the index in range.
+        self.index = if self.coefficients.is_empty() {
+            0
+        } else {
+            self.index % self.coefficients.len()
+        };
     }
 }
 
@@ -51,5 +57,29 @@ impl Processor for FirFilter {
         self.index = (self.index + 1) % len;
 
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_coefficients_are_a_pass_through() {
+        let mut fir = FirFilter::new(vec![0.5, 0.5]);
+
+        // Must not panic (this used to divide by zero), and must pass the signal through.
+        fir.update_coefficients(Vec::new());
+        assert_eq!(fir.process_sample(0.25), 0.25);
+        assert_eq!(fir.process_sample(-1.0), -1.0);
+    }
+
+    #[test]
+    fn running_average_of_two_taps_averages() {
+        let mut fir = FirFilter::new(vec![0.5, 0.5]);
+
+        assert!((fir.process_sample(1.0) - 0.5).abs() < 1e-6);
+        assert!((fir.process_sample(0.0) - 0.5).abs() < 1e-6);
+        assert!(fir.process_sample(0.0).abs() < 1e-6);
     }
 }

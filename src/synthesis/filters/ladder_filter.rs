@@ -60,10 +60,19 @@ impl LadderFilter {
     pub fn configure_hardware_denormal_flush() {
         unsafe {
             // Using standard core architecture paths to guarantee absolute toolchain compliance
-            let mut mxcsr = std::arch::x86_64::_mm_getcsr();
+            let mut mxcsr: u32 = 0;
+            std::arch::asm!(
+                "stmxcsr [{}]",
+                in(reg) &mut mxcsr,
+                options(nostack, preserves_flags)
+            );
             // Bit 15: Flush-to-Zero (FTZ) | Bit 6: Denormals-Are-Zero (DAZ)
             mxcsr |= (1 << 15) | (1 << 6);
-            std::arch::x86_64::_mm_setcsr(mxcsr);
+            std::arch::asm!(
+                "ldmxcsr [{}]",
+                in(reg) &mxcsr,
+                options(nostack, preserves_flags)
+            );
         }
     }
 

@@ -1,5 +1,11 @@
-/// Simple fractional interpolator.
-/// Uses Hermite cubic interpolation for high quality.
+/// Simple fractional interpolator using cubic Hermite interpolation.
+/// Provides high-quality sample interpolation with minimal latency.
+///
+/// Uses a sliding window of 4 samples and applies Hermite polynomial interpolation
+/// to estimate values at fractional positions. Ideal for:
+/// - Sample rate conversion
+/// - Fractional delay lines
+/// - Smooth parameter transitions
 #[derive(Debug, Clone)]
 pub struct HermiteInterpolator {
     buffer: [f32; 4],

@@ -2,8 +2,11 @@ pub mod chain;
 pub mod hermite_interpolator;
 pub mod parameter_smoother;
 pub mod resampler;
-
+pub mod rand_utils;
+pub mod bezier;
 pub use chain::{ParallelProcessor, Processor, ProcessorChain};
 pub use hermite_interpolator::HermiteInterpolator;
 pub use parameter_smoother::ParameterSmoother;
 pub use resampler::HermiteResampler;
+pub use rand_utils::{random_f32, random_f32_range, random_i32, random_range, random_sign};
+pub use bezier::Bezier;
