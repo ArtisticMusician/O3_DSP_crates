@@ -5,11 +5,17 @@
 //! record, sample) and keep playback on the audio thread: hand the snapshot to
 //! [`crate::synthesis::oscillators::SineBank`], one sine per partial.
 
+pub mod additive;
 pub mod analysis;
 pub mod fft;
+pub mod morph;
+pub mod spectrum;
 
+pub use additive::AdditiveOscillator;
 pub use analysis::SpectralAnalyser;
 pub use fft::{Complex, Fft};
+pub use morph::SpectrumMorph;
+pub use spectrum::{HarmonicSpectrum, MAX_PARTIALS};
 
 /// One sinusoidal component of a frame.
 ///

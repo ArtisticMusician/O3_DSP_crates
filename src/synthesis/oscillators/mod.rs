@@ -22,6 +22,8 @@ pub use supersaw::Supersaw;
 pub use vector::VectorSynthesis;
 pub use wavetable::WavetableOscillator;
 
+use crate::synthesis::spectral::AdditiveOscillator;
+
 #[derive(Debug, Clone)]
 pub enum OscillatorModule {
     PolyBlep(TableOscillator),
@@ -34,6 +36,7 @@ pub enum OscillatorModule {
     PhysicalModeling(MassSpring),
     KarplusStrong(KarplusStrong),
     Supersaw(Supersaw),
+    Additive(AdditiveOscillator),
 }
 
 impl OscillatorModule {
@@ -50,6 +53,28 @@ impl OscillatorModule {
             OscillatorModule::PhaseDistortion(osc) => osc.process_sample(0.0),
             OscillatorModule::Vector(osc) => osc.process_sample(0.0),
             OscillatorModule::PhysicalModeling(osc) => osc.process_sample(0.0),
+            OscillatorModule::Additive(osc) => osc.next_sample(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_additive_variant_dispatches_to_its_oscillator() {
+        let mut oscillator = AdditiveOscillator::new(48_000.0);
+        oscillator.set_frequency(440.0);
+        oscillator.reset_frequency(440.0);
+        let mut module = OscillatorModule::Additive(oscillator);
+
+        let output: Vec<f32> = (0..4_800)
+            .map(|_| module.next_sample(Waveform::Sine, NoiseType::White))
+            .collect();
+        let rms = (output.iter().map(|s| s * s).sum::<f32>() / output.len() as f32).sqrt();
+
+        assert!(rms > 0.05, "the additive arm produced silence, RMS {rms}");
+        assert!(output.iter().all(|s| s.is_finite()), "additive output went non-finite");
     }
 }
