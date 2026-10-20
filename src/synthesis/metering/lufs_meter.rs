@@ -21,6 +21,82 @@ const SHELF_Q: f32 = 0.707_175_2;
 const HIGHPASS_FREQUENCY: f32 = 38.135_47;
 const HIGHPASS_Q: f32 = 0.500_327;
 
+/// Resolution of the integrated-loudness histogram, in LU per bin.
+const HISTOGRAM_RESOLUTION_LU: f32 = 0.1;
+/// Loudness covered by the histogram: the silence floor up to a ceiling above 0 dBFS programme.
+const HISTOGRAM_LOWEST_LUFS: f32 = SILENCE_LUFS;
+const HISTOGRAM_HIGHEST_LUFS: f32 = 24.0;
+const HISTOGRAM_BINS: usize =
+    ((HISTOGRAM_HIGHEST_LUFS - HISTOGRAM_LOWEST_LUFS) / HISTOGRAM_RESOLUTION_LU) as usize + 1;
+
+/// Every 400 ms block the gated integrated measure needs, binned by loudness.
+///
+/// The block history of a stream is unbounded, so keeping the blocks themselves means allocating
+/// on the audio thread forever. Binning them - the approach libebur128 takes - makes both gating
+/// passes a walk over a fixed table, and keeps each bin's exact energy so a gated average is still
+/// an energy average.
+#[derive(Debug, Clone)]
+struct BlockHistogram {
+    /// Blocks per bin.
+    counts: [u32; HISTOGRAM_BINS],
+    /// Sum of those blocks' mean squares.
+    energy: [f64; HISTOGRAM_BINS],
+    /// Total blocks recorded.
+    total: usize,
+}
+
+impl BlockHistogram {
+    fn new() -> Self {
+        Self {
+            counts: [0; HISTOGRAM_BINS],
+            energy: [0.0; HISTOGRAM_BINS],
+            total: 0,
+        }
+    }
+
+    /// Bin a block by its loudness, keeping its energy.
+    fn record(&mut self, mean_square: f32) {
+        let bin = Self::bin_for_loudness(loudness(mean_square));
+        self.counts[bin] += 1;
+        self.energy[bin] += mean_square as f64;
+        self.total += 1;
+    }
+
+    fn bin_for_loudness(lufs: f32) -> usize {
+        let index = ((lufs - HISTOGRAM_LOWEST_LUFS) / HISTOGRAM_RESOLUTION_LU).round();
+        index.clamp(0.0, (HISTOGRAM_BINS - 1) as f32) as usize
+    }
+
+    /// First bin whose loudness is strictly above `threshold_lufs`.
+    fn first_bin_above(threshold_lufs: f32) -> usize {
+        let raw = (threshold_lufs - HISTOGRAM_LOWEST_LUFS) / HISTOGRAM_RESOLUTION_LU;
+        if raw < 0.0 {
+            return 0;
+        }
+        (raw.floor() as usize + 1).min(HISTOGRAM_BINS)
+    }
+
+    /// Energy average and block count of everything above `threshold_lufs`, or `None` if the gate
+    /// rejects every block.
+    fn gated_mean_above(&self, threshold_lufs: f32) -> Option<(f64, usize)> {
+        let mut energy = 0.0f64;
+        let mut count = 0usize;
+
+        for bin in Self::first_bin_above(threshold_lufs)..HISTOGRAM_BINS {
+            if self.counts[bin] > 0 {
+                energy += self.energy[bin];
+                count += self.counts[bin] as usize;
+            }
+        }
+
+        if count == 0 {
+            None
+        } else {
+            Some((energy / count as f64, count))
+        }
+    }
+}
+
 /// ITU-R BS.1770 loudness meter.
 ///
 /// K-weights each channel, sums their mean squares, and reports:
@@ -29,8 +105,9 @@ const HIGHPASS_Q: f32 = 0.500_327;
 /// - **integrated**, gated (BS.1770-4): 400 ms blocks stepped every 100 ms, with a -70 LUFS
 ///   absolute gate and then a -10 LU relative gate
 ///
-/// Silence reports [`SILENCE_LUFS`]. The K-weighting filters are derived from the standard's
-/// prototype parameters, so the meter calibrates at any sample rate rather than only at 48 kHz.
+/// Silence reports `SILENCE_LUFS` (-144.0). The K-weighting filters are derived from the
+/// standard's prototype parameters, so the meter calibrates at any sample rate rather than only at
+/// 48 kHz, and the gated history is a fixed table, so nothing allocates after [`Self::new`].
 #[derive(Debug, Clone)]
 pub struct LufsMeter {
     shelf: Coefs,
@@ -43,8 +120,8 @@ pub struct LufsMeter {
     momentary: SlidingWindow,
     short_term: SlidingWindow,
 
-    // 400 ms block means, sampled every 100 ms, for the gated integrated measure
-    blocks: Vec<f32>,
+    // 400 ms block means, sampled every 100 ms, binned by loudness for the gated integrated measure
+    blocks: BlockHistogram,
     block_interval: u32,
     samples_since_block: u32,
 }
@@ -64,7 +141,7 @@ impl LufsMeter {
             momentary: SlidingWindow::new(window_samples(sample_rate, 400.0)),
             short_term: SlidingWindow::new(window_samples(sample_rate, 3_000.0)),
 
-            blocks: Vec::new(),
+            blocks: BlockHistogram::new(),
             block_interval: window_samples(sample_rate, 100.0).max(1) as u32,
             samples_since_block: 0,
         }
@@ -101,7 +178,7 @@ impl LufsMeter {
         if self.samples_since_block >= self.block_interval {
             self.samples_since_block = 0;
             if self.momentary.is_full() {
-                self.blocks.push(self.momentary.mean());
+                self.blocks.record(self.momentary.mean());
             }
         }
     }
@@ -124,41 +201,27 @@ impl LufsMeter {
 
     /// Gated integrated loudness over everything fed so far.
     pub fn integrated(&self) -> f32 {
-        if self.blocks.is_empty() {
+        if self.blocks.total == 0 {
             return SILENCE_LUFS;
         }
 
         // Absolute gate first.
-        let above_absolute: Vec<f32> = self
-            .blocks
-            .iter()
-            .copied()
-            .filter(|block| loudness(*block) > ABSOLUTE_GATE_LUFS)
-            .collect();
-
-        if above_absolute.is_empty() {
+        let Some((absolute_mean, _)) = self.blocks.gated_mean_above(ABSOLUTE_GATE_LUFS) else {
             return SILENCE_LUFS;
-        }
+        };
 
         // Then the relative gate, measured from the absolute-gated average.
-        let absolute_mean = above_absolute.iter().sum::<f32>() / above_absolute.len() as f32;
-        let relative_threshold = loudness(absolute_mean) + RELATIVE_GATE_LU;
-
-        let gated: Vec<f32> = above_absolute
-            .into_iter()
-            .filter(|block| loudness(*block) > relative_threshold)
-            .collect();
-
-        if gated.is_empty() {
+        let relative_threshold = loudness(absolute_mean as f32) + RELATIVE_GATE_LU;
+        let Some((gated_mean, _)) = self.blocks.gated_mean_above(relative_threshold) else {
             return SILENCE_LUFS;
-        }
+        };
 
-        loudness(gated.iter().sum::<f32>() / gated.len() as f32)
+        loudness(gated_mean as f32)
     }
 
     /// Number of 400 ms blocks that have been measured so far.
     pub fn block_count(&self) -> usize {
-        self.blocks.len()
+        self.blocks.total
     }
 
     /// Clear everything, including the integrated history.
@@ -167,7 +230,7 @@ impl LufsMeter {
         self.highpass_state = [[0.0; 2]; 2];
         self.momentary.clear();
         self.short_term.clear();
-        self.blocks.clear();
+        self.blocks = BlockHistogram::new();
         self.samples_since_block = 0;
     }
 }

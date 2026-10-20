@@ -11,7 +11,7 @@ In audio plugin development (VST3/CLAP), the golden rule is **never block the au
 
 O3DSP was explicitly architected around this constraint. A complete audit of the codebase confirms that:
 * **All Memory is Pre-Allocated:** Every module (`Delay`, `ReverbFdn`, `WavetableOscillator`, `LookaheadLimiter`, `BiquadBank`, etc.) pre-allocates its required `Vec`s and circular buffers entirely within its `new()` constructor.
-* **Zero Processing Allocations:** The hot-paths (`process_sample`, `process_block`, `next_sample`) contain zero calls to `Vec::new()`, `push()`, or `alloc()`. Instead, they rely on pre-computed sizes, bitmask wrapping (`idx & mask`), and lock-free rings (`SpscRingBuffer`).
+* **Zero Processing Allocations:** The hot-paths (`process_sample`, `process_block`, `next_sample`) never grow a buffer: every size is fixed in `new()`, so the only `push`-shaped calls are index-and-wrap writes into pre-allocated storage (for example `LufsMeter`'s gated block history is a fixed loudness histogram, not a growing `Vec`). Instead, they rely on pre-computed sizes, bitmask wrapping (`idx & mask`), and lock-free rings (`SpscRingBuffer`).
 * **No Dynamic Dispatch:** Unlike `fundsp`, which frequently utilizes `Box<dyn AudioNode>` to build dynamic audio graphs, O3DSP heavily leverages statically typed structures and enums (`FilterModule`, `OscillatorModule`). This completely eliminates the overhead of vtable lookups and the risk of implicit `Box` allocations during graph mutations on the audio thread.
 * **Custom FramePool:** O3DSP features a custom, lock-free, 64-byte cache-line aligned `FramePool` (`src/memory/frame_pool.rs`) for managing audio buffers cleanly between UI and audio threads without risking priority inversion.
 

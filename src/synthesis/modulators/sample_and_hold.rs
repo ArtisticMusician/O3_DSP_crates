@@ -138,8 +138,6 @@ mod tests {
 
     #[test]
     fn test_update_rate() {
-        let mut modulator = SampleAndHold::new(48000.0, 100.0);
-        
         let sample_rate = 48_000.0;
 
         // A fast modulator samples every 48 samples and catches the input almost at once;

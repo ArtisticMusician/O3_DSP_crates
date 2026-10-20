@@ -6,4 +6,5 @@ pub mod math_utils;
 pub mod metering;
 pub mod modulators;
 pub mod oscillators;
+pub mod spectral;
 pub mod utils;

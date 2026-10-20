@@ -2,8 +2,8 @@
 /// Creates notches and peaks in the frequency response based on delay time.
 ///
 /// Two variants:
-/// - Feedforward (FIR): y[n] = x[n] + feedback * x[n - D]
-/// - Feedback (IIR): y[n] = x[n] + feedback * y[n - D]
+/// - Feedforward (FIR): `y[n] = x[n] + feedback * x[n - D]`
+/// - Feedback (IIR): `y[n] = x[n] + feedback * y[n - D]`
 ///
 /// Use cases:
 /// - Flanging (short delay, high feedback)
