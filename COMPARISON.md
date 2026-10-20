@@ -23,7 +23,7 @@ O3DSP was explicitly architected around this constraint. A complete audit of the
 ## 2. Performance & Hardware Optimization
 
 ### Where O3DSP Excels: Explicit SIMD & Math Approximations
-* **Hand-Tuned SIMD:** O3DSP doesn't just rely on LLVM auto-vectorization. `src/core/simd_processor.rs` includes explicit `core::arch::x86_64` intrinsics for AVX2 and FMA (Fused Multiply-Add). It detects CPU features at instantiation and utilizes a zero-cost abstraction to dispatch to the AVX2 path, drastically speeding up channel mixing. Most DSP crates like `dasp` and `biquad` leave vectorization entirely to the compiler.
+* **Hand-Tuned SIMD:** O3DSP doesn't just rely on LLVM auto-vectorization. `src/core/simd_processor.rs` includes explicit `core::arch::x86_64` intrinsics for AVX2 and FMA (Fused Multiply-Add). It detects CPU features at instantiation and dispatches to the AVX2 path for channel mixing, falling back to a scalar path when those features are absent. Most DSP crates like `dasp` and `biquad` leave vectorization entirely to the compiler. This is a dispatch guarantee, not a measured speedup: the crate publishes no benchmarks.
 * **Fast Approximations:** Real-time audio requires heavy usage of `powf` and `log10` for dB/linear conversions. O3DSP's `math_utils.rs` provides `db_to_linear_approx` and `linear_to_db_approx`—highly optimized approximations that avoid pipeline-stalling transcendental math instructions on the audio thread.
 * **Cache Locality:** By avoiding scattered heap allocations and using `CachePadded` to prevent false sharing across threads, O3DSP ensures that audio processing stays neatly inside L1/L2 caches.
 
@@ -39,7 +39,7 @@ While `biquad` is purely a math library for calculating filter coefficients, and
 
 * **Advanced Oscillators:** O3DSP includes highly complex oscillators rarely found in basic crates:
   * **Granular Synthesis:** (`GranularOscillator`) with smooth detuning and Hann windowing.
-  * **Wavetable:** (`WavetableOscillator`) featuring pre-calculated mipmaps to completely eliminate high-frequency aliasing, plus cubic Hermite interpolation.
+  * **Wavetable:** (`WavetableOscillator`) featuring pre-calculated mipmaps and cubic Hermite interpolation to reduce high-frequency aliasing.
   * **Physical Modeling:** (`MassSpring`, `KarplusStrong`) for realistic string/resonator sounds.
   * **Supersaw & Phase Distortion.**
 * **Rich Filter Ecosystem:** It goes far beyond standard biquads, offering:
@@ -55,7 +55,7 @@ While `biquad` is purely a math library for calculating filter coefficients, and
 ## 4. API Usability and Modularity
 
 ### Where O3DSP Excels: Parameter Smoothing & Granularity
-* **Built-in Parameter Smoothing:** A massive pain point in Rust audio development is "zipper noise" when automating parameters (e.g., sweeping a filter cutoff). Every single module in O3DSP embeds `ParameterSmoother`. You simply call `set_cutoff()`, and the module automatically applies an exponential glide to the new value over time.
+* **Built-in Parameter Smoothing:** A massive pain point in Rust audio development is "zipper noise" when automating parameters (e.g., sweeping a filter cutoff). 35 of the crate's source files embed `ParameterSmoother`, so a setter such as `set_cutoff()` glides exponentially to the new value instead of stepping. Coverage is not universal: `Chorus`, for one, writes plain fields that are read once per block.
 * **Strict Modularity:** Following strict separation of concerns, almost every file contains exactly one primary DSP struct. This makes the codebase incredibly easy to navigate and extend.
 
 ### Where O3DSP Falls Short
