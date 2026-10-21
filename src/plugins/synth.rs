@@ -4,7 +4,9 @@
 //! of the buffer.
 
 use nih_plug::prelude::*;
-use nih_plug_egui::{create_egui_editor, widgets, EguiState};
+use nih_plug_egui::{
+    create_egui_editor, egui::Vec2, resizable_window::ResizableWindow, widgets, EguiState,
+};
 use std::sync::Arc;
 
 use crate::synthesis::envelopes::AdsrEnvelope;
@@ -51,7 +53,7 @@ pub struct O3SynthParams {
 impl Default for O3SynthParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(360, 300),
+            editor_state: EguiState::from_size(360, 400),
             gain: FloatParam::new("Gain", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(20.0))
                 .with_unit(" gain"),
@@ -133,26 +135,29 @@ impl Plugin for O3Synth {
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
         let state = self.params.editor_state.clone();
+        let window_state = state.clone();
 
         create_egui_editor(state, (), |_, _| {}, move |ui_context, setter, _state| {
-            nih_plug_egui::egui::CentralPanel::default().show(ui_context, |ui| {
-                ui.heading("O3DSP Synth");
+            ResizableWindow::new("o3dsp-synth")
+                .min_size(Vec2::new(280.0, 200.0))
+                .show(ui_context, window_state.as_ref(), |ui| {
+                    ui.heading("O3DSP Synth");
 
-                for (label, param) in [
-                    ("Gain", &params.gain),
-                    ("Cutoff", &params.cutoff),
-                    ("Attack", &params.attack),
-                    ("Decay", &params.decay),
-                    ("Sustain", &params.sustain),
-                    ("Release", &params.release),
-                ] {
-                    ui.label(label);
-                    ui.add(widgets::ParamSlider::for_param(param, setter));
-                }
+                    for (label, param) in [
+                        ("Gain", &params.gain),
+                        ("Cutoff", &params.cutoff),
+                        ("Attack", &params.attack),
+                        ("Decay", &params.decay),
+                        ("Sustain", &params.sustain),
+                        ("Release", &params.release),
+                    ] {
+                        ui.label(label);
+                        ui.add(widgets::ParamSlider::for_param(param, setter));
+                    }
 
-                ui.label("Wave");
-                ui.add(widgets::ParamSlider::for_param(&params.wave, setter));
-            });
+                    ui.label("Wave");
+                    ui.add(widgets::ParamSlider::for_param(&params.wave, setter));
+                });
         })
     }
 

@@ -1,7 +1,9 @@
 //! An effect plugin: the crate's feedback delay network reverb, stereo in and out.
 
 use nih_plug::prelude::*;
-use nih_plug_egui::{create_egui_editor, widgets, EguiState};
+use nih_plug_egui::{
+    create_egui_editor, egui::Vec2, resizable_window::ResizableWindow, widgets, EguiState,
+};
 use std::sync::Arc;
 
 use crate::synthesis::effects::ReverbFdn;
@@ -80,21 +82,24 @@ impl Plugin for O3Reverb {
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
         let state = self.params.editor_state.clone();
+        let window_state = state.clone();
 
         create_egui_editor(state, (), |_, _| {}, move |ui_context, setter, _state| {
-            nih_plug_egui::egui::CentralPanel::default().show(ui_context, |ui| {
-                ui.heading("O3DSP Reverb");
+            ResizableWindow::new("o3dsp-reverb")
+                .min_size(Vec2::new(280.0, 160.0))
+                .show(ui_context, window_state.as_ref(), |ui| {
+                    ui.heading("O3DSP Reverb");
 
-                for (label, param) in [
-                    ("Mix", &params.mix),
-                    ("Decay", &params.decay),
-                    ("Damping", &params.damping),
-                    ("Output", &params.output),
-                ] {
-                    ui.label(label);
-                    ui.add(widgets::ParamSlider::for_param(param, setter));
-                }
-            });
+                    for (label, param) in [
+                        ("Mix", &params.mix),
+                        ("Decay", &params.decay),
+                        ("Damping", &params.damping),
+                        ("Output", &params.output),
+                    ] {
+                        ui.label(label);
+                        ui.add(widgets::ParamSlider::for_param(param, setter));
+                    }
+                });
         })
     }
 
