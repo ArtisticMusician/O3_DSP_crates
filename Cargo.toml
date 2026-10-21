@@ -8,7 +8,6 @@ name = "o3dsp"
 crate-type = ["lib"]
 
 [dependencies]
-atomic_float = "1.0"
 rand = { version = "0.8", features = ["small_rng"] }
 
 [features]
