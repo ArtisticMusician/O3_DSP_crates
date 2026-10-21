@@ -7,9 +7,12 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
+use o3dsp::synthesis::filters::{FilterModule, OnePoleFilter};
 use o3dsp::synthesis::metering::LufsMeter;
 use o3dsp::synthesis::oscillators::SineBank;
 use o3dsp::synthesis::spectral::{AdditiveOscillator, HarmonicSpectrum, Partial, MAX_PARTIALS};
+use o3dsp::synthesis::utils::graph::{AudioGraph, GraphNode, MathOp};
+use o3dsp::synthesis::utils::Processor;
 
 // Allocations made on this thread since the counter was last reset.
 thread_local! {
@@ -121,6 +124,42 @@ fn additive_oscillator_allocates_nothing_while_processing() {
     assert_eq!(
         allocations, 0,
         "AdditiveOscillator hit the heap {allocations} times on the audio path"
+    );
+}
+
+#[test]
+fn audio_graph_allocates_nothing_while_processing() {
+    let mut graph = AudioGraph::new();
+
+    let input = graph.add_node(GraphNode::Input);
+    let mut lowpass = OnePoleFilter::new();
+    lowpass.set_lowpass(0.1);
+    let filter = graph.add_node(GraphNode::Filter(FilterModule::OnePole(lowpass)));
+    let gain = graph.add_node(GraphNode::Constant(0.5));
+    let mix = graph.add_node(GraphNode::Math(MathOp::Multiply));
+
+    graph.connect(input, filter, 0);
+    graph.connect(filter, mix, 0);
+    graph.connect(gain, mix, 1);
+    graph.set_output_node(mix);
+    graph.compile();
+
+    for _ in 0..1_000 {
+        let _ = graph.process_sample(0.1);
+    }
+
+    let (last, allocations) = allocations_during(|| {
+        let mut last = 0.0;
+        for _ in 0..SAMPLE_RATE as usize {
+            last = graph.process_sample(0.1);
+        }
+        last
+    });
+
+    assert!(last.is_finite(), "graph produced {last}");
+    assert_eq!(
+        allocations, 0,
+        "AudioGraph hit the heap {allocations} times on the audio path"
     );
 }
 
