@@ -7,9 +7,6 @@ edition = "2021"
 name = "o3dsp"
 crate-type = ["lib"]
 
-[dependencies]
-rand = { version = "0.8", features = ["small_rng"] }
-
 [features]
 default = []
 dasp_support = ["dep:dasp"]
