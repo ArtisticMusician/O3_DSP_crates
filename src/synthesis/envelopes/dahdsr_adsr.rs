@@ -1,3 +1,6 @@
+/// Below this level the envelope is treated as silent: -80 dBFS, inaudible against any programme.
+const RELEASE_FLOOR: f32 = 1e-4;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdsrStage {
     Idle,
@@ -69,8 +72,13 @@ impl AdsrEnvelope {
         } else {
             1.0
         };
+        // The release has to reach silence *within* its own duration, not one time constant into
+        // it: stopping at 1 tau leaves the level around 26% of where it started, and dropping from
+        // there to zero is an audible click. Pick the coefficient that lands on RELEASE_FLOOR after
+        // exactly `release_sec` worth of samples.
         self.release_coef = if release_sec > 0.0 {
-            1.0 - (-1.0 / (release_sec * self.sample_rate)).exp()
+            let samples = (release_sec * self.sample_rate).max(1.0);
+            1.0 - (RELEASE_FLOOR as f64).powf(1.0 / samples as f64) as f32
         } else {
             1.0
         };
@@ -164,15 +172,99 @@ impl AdsrEnvelope {
                 self.current_level = self.sustain_level;
             }
             AdsrStage::Release => {
-                self.current_level += (-0.005 - self.current_level) * self.release_coef;
+                self.current_level += (0.0 - self.current_level) * self.release_coef;
                 self.stage_samples = self.stage_samples.saturating_sub(1);
 
-                if self.stage_samples == 0 || self.current_level <= 0.0 {
+                // The counter is a bound, not the ending: only go idle once the level is actually
+                // inaudible, otherwise the last sample is a step from a loud level to zero.
+                if self.current_level <= RELEASE_FLOOR || self.stage_samples == 0 {
                     self.current_level = 0.0;
                     self.stage = AdsrStage::Idle;
                 }
             }
         }
         self.current_level
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE_RATE: f32 = 48_000.0;
+
+    /// Run a note into sustain, release it, and report the level of the last sample that was not
+    /// yet silent, plus how long the release took in seconds.
+    fn release_tail(release_sec: f32) -> (f32, f32) {
+        let mut envelope = AdsrEnvelope::new(SAMPLE_RATE);
+        envelope.set_parameters(0.001, 0.05, 1.0, release_sec);
+
+        envelope.gate_on();
+        for _ in 0..4_800 {
+            envelope.next_coefficient();
+        }
+
+        envelope.gate_off();
+        let mut last_audible = 1.0;
+        let mut samples = 0;
+        loop {
+            let level = envelope.next_coefficient();
+            samples += 1;
+            if level <= 0.0 {
+                break;
+            }
+            last_audible = level;
+            assert!(samples < (SAMPLE_RATE * 30.0) as usize, "the release never ended");
+        }
+
+        (last_audible, samples as f32 / SAMPLE_RATE)
+    }
+
+    #[test]
+    fn the_release_lands_on_silence_instead_of_cutting() {
+        // Stopping one time constant into the release leaves roughly a quarter of the level in
+        // place, and stepping from there to zero clicks. The last audible sample must be quiet.
+        let (last_audible, _) = release_tail(0.4);
+        let decibels = 20.0 * last_audible.log10();
+
+        assert!(
+            last_audible < 1e-3,
+            "release cut from {last_audible} ({decibels:.1} dBFS)"
+        );
+    }
+
+    #[test]
+    fn a_longer_release_takes_longer() {
+        let (_, short) = release_tail(0.1);
+        let (_, long) = release_tail(1.0);
+
+        assert!(
+            long > short * 3.0,
+            "0.1 s took {short} s, 1.0 s took {long} s"
+        );
+    }
+
+    #[test]
+    fn a_release_reaches_silence_within_its_own_duration() {
+        // The parameter promises a length; the fade must not drag on for several seconds.
+        let (_, seconds) = release_tail(0.4);
+        assert!(
+            seconds > 0.1 && seconds < 0.8,
+            "a 0.4 s release took {seconds} s"
+        );
+    }
+
+    #[test]
+    fn the_sustain_level_is_held_indefinitely() {
+        let mut envelope = AdsrEnvelope::new(SAMPLE_RATE);
+        envelope.set_parameters(0.001, 0.05, 0.5, 0.4);
+        envelope.gate_on();
+
+        let mut level = 0.0;
+        for _ in 0..(SAMPLE_RATE as usize * 2) {
+            level = envelope.next_coefficient();
+        }
+
+        assert!((level - 0.5).abs() < 0.01, "sustain settled at {level}");
     }
 }

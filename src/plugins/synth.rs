@@ -20,12 +20,31 @@ const WAVEFORMS: [Waveform; 4] = [
     Waveform::Triangle,
 ];
 
+#[cfg(feature = "diag")]
+fn diag(message: &str) {
+    use std::io::Write;
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("D:/O3DSP_diag.log")
+    {
+        let _ = writeln!(file, "{message}");
+    }
+}
+
+#[cfg(not(feature = "diag"))]
+fn diag(_message: &str) {}
+
+static BLOCKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 pub struct O3Synth {
     params: Arc<O3SynthParams>,
     oscillator: TableOscillator,
     filter: OnePoleFilter,
     envelope: AdsrEnvelope,
     frequency: f32,
+    velocity: f32,
+    sample_rate: f32,
 }
 
 #[derive(Params)]
@@ -74,7 +93,16 @@ impl Default for O3SynthParams {
             sustain: FloatParam::new("Sustain", 0.7, FloatRange::Linear { min: 0.0, max: 1.0 }),
             release: FloatParam::new("Release", 0.4, FloatRange::Linear { min: 0.0, max: 5.0 })
                 .with_unit(" s"),
-            wave: IntParam::new("Wave", 1, IntRange::Linear { min: 0, max: 3 }),
+            wave: IntParam::new("Wave", 1, IntRange::Linear { min: 0, max: 3 })
+                .with_value_to_string(Arc::new(|index: i32| {
+                    match index {
+                        0 => "Sine",
+                        1 => "Saw",
+                        2 => "Square",
+                        _ => "Triangle",
+                    }
+                    .to_string()
+                })),
         }
     }
 }
@@ -94,7 +122,52 @@ impl O3Synth {
             filter: OnePoleFilter::new(),
             envelope: AdsrEnvelope::new(sample_rate),
             frequency: 440.0,
+            velocity: 1.0,
+            sample_rate,
         }
+    }
+
+    /// Rebuild the DSP for a new sample rate. `params` is deliberately left alone: the host and
+    /// the editor hold their own `Arc` to it, and replacing it silently breaks automation.
+    fn prepare(&mut self, sample_rate: f32) {
+        self.oscillator = TableOscillator::new(sample_rate);
+        self.envelope = AdsrEnvelope::new(sample_rate);
+        self.filter = OnePoleFilter::new();
+        self.sample_rate = sample_rate;
+    }
+
+    /// Start a note: pitch comes from the MIDI note, level from the velocity.
+    fn note_on(&mut self, note: u8, velocity: f32) {
+        diag(&format!("note on: {note} velocity {velocity}"));
+        self.frequency = 440.0 * 2.0f32.powf((note as f32 - 69.0) / 12.0);
+        self.velocity = velocity.clamp(0.0, 1.0);
+        self.oscillator.set_frequency(self.frequency);
+        self.envelope.gate_on();
+    }
+
+    /// Push the parameter block into the DSP. Runs once per block, before the sample loop.
+    fn apply_parameters(&mut self) {
+        // The host re-targets this smoother on automation; aiming it at the current value here
+        // keeps the audio path correct even before the first automation event arrives.
+        self.params
+            .gain
+            .smoothed
+            .set_target(self.sample_rate, self.params.gain.value());
+        self.envelope.set_parameters(
+            self.params.attack.value(),
+            self.params.decay.value(),
+            self.params.sustain.value(),
+            self.params.release.value(),
+        );
+        self.filter.set_lowpass(self.normalised_cutoff(self.sample_rate));
+    }
+
+    /// One sample of the chain: oscillator -> one-pole -> envelope -> velocity -> gain.
+    #[inline]
+    fn next_sample(&mut self) -> f32 {
+        let gain = self.params.gain.smoothed.next();
+        let level = self.envelope.next_coefficient();
+        self.filter.process(self.oscillator.next_sample(self.waveform())) * level * self.velocity * gain
     }
 
     fn waveform(&self) -> Waveform {
@@ -102,10 +175,11 @@ impl O3Synth {
         WAVEFORMS[index as usize]
     }
 
-    /// One-pole coefficient for `cutoff` Hz: `1 - e^(-2*pi*fc/fs)`, clamped to a stable range.
-    fn cutoff_coefficient(&self, sample_rate: f32) -> f32 {
+    /// Normalised one-pole cutoff for `cutoff` Hz. `OnePoleFilter::set_lowpass` takes a fraction
+    /// of the sample rate (0.0 to 0.5), not a coefficient.
+    fn normalised_cutoff(&self, sample_rate: f32) -> f32 {
         let cutoff = self.params.cutoff.value().clamp(20.0, sample_rate * 0.45);
-        (1.0 - (-std::f32::consts::TAU * cutoff / sample_rate).exp()).clamp(0.0, 1.0)
+        (cutoff / sample_rate).clamp(0.0, 0.5)
     }
 }
 
@@ -167,15 +241,14 @@ impl Plugin for O3Synth {
         buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        // Rebuild the DSP at the rate the host actually runs at.
-        *self = Self::with_sample_rate(buffer_config.sample_rate);
+        self.prepare(buffer_config.sample_rate);
+        diag(&format!("initialize: sample_rate {}", buffer_config.sample_rate));
         true
     }
 
     fn reset(&mut self) {
-        self.oscillator = TableOscillator::new(48_000.0);
-        self.envelope = AdsrEnvelope::new(48_000.0);
-        self.filter = OnePoleFilter::new();
+        let sample_rate = self.sample_rate;
+        self.prepare(sample_rate);
     }
 
     fn process(
@@ -188,33 +261,36 @@ impl Plugin for O3Synth {
 
         while let Some(event) = context.next_event() {
             match event {
-                NoteEvent::NoteOn { note, velocity, .. } => {
-                    self.frequency = 440.0 * 2.0f32.powf((note as f32 - 69.0) / 12.0);
-                    self.oscillator.set_frequency(self.frequency * velocity.max(0.01));
-                    self.envelope.gate_on();
+                NoteEvent::NoteOn { note, velocity, .. } => self.note_on(note, velocity),
+                NoteEvent::NoteOff { .. } => {
+                    diag("note off");
+                    self.envelope.gate_off();
                 }
-                NoteEvent::NoteOff { .. } => self.envelope.gate_off(),
                 _ => (),
             }
         }
 
-        self.envelope.set_parameters(
-            self.params.attack.value(),
-            self.params.decay.value(),
-            self.params.sustain.value(),
-            self.params.release.value(),
-        );
-        self.filter.set_lowpass(self.cutoff_coefficient(sample_rate));
+        self.apply_parameters();
 
+        let mut peak = 0.0f32;
         for channel_samples in buffer.iter_samples() {
-            let gain = self.params.gain.smoothed.next();
-            let level = self.envelope.next_coefficient();
-            let sample =
-                self.filter.process(self.oscillator.next_sample(self.waveform())) * level * gain;
+            let sample = self.next_sample();
+            peak = peak.max(sample.abs());
 
             for channel in channel_samples {
                 *channel = sample;
             }
+        }
+
+        let block = BLOCKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if block < 3 || block % 100 == 0 {
+            diag(&format!(
+                "block {block}: channels {} samples {} peak {peak:.5} cutoff {:.4} freq {:.1}",
+                buffer.channels(),
+                buffer.samples(),
+                self.normalised_cutoff(sample_rate),
+                self.frequency
+            ));
         }
 
         ProcessStatus::Normal
@@ -243,49 +319,186 @@ impl Vst3Plugin for O3Synth {
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_note_on_opens_the_envelope_and_note_off_closes_it() {
+    const SAMPLE_RATE: f32 = 48_000.0;
+
+    fn render(synth: &mut O3Synth, samples: usize) -> Vec<f32> {
+        (0..samples).map(|_| synth.next_sample()).collect()
+    }
+
+    fn rms(buffer: &[f32]) -> f32 {
+        (buffer.iter().map(|s| s * s).sum::<f32>() / buffer.len() as f32).sqrt()
+    }
+
+    /// Upward zero crossings per second. Independent of the FFT, so it cannot share a bug with it.
+    fn frequency(buffer: &[f32], sample_rate: f32) -> f32 {
+        let crossings = buffer.windows(2).filter(|pair| pair[0] <= 0.0 && pair[1] > 0.0).count();
+        crossings as f32 * sample_rate / buffer.len() as f32
+    }
+
+    fn sounding_synth() -> O3Synth {
         let mut synth = O3Synth::default();
-        synth.envelope.set_parameters(0.001, 0.001, 1.0, 0.001);
-
-        synth.envelope.gate_on();
-        let mut sounding = 0.0;
-        for _ in 0..48_000 {
-            sounding = synth.envelope.next_coefficient();
-        }
-        assert!(sounding > 0.9, "envelope should be open, got {sounding}");
-
-        synth.envelope.gate_off();
-        for _ in 0..48_000 {
-            sounding = synth.envelope.next_coefficient();
-        }
-        assert!(sounding < 0.01, "envelope should be closed, got {sounding}");
+        synth.prepare(SAMPLE_RATE);
+        synth.apply_parameters();
+        synth
     }
 
     #[test]
-    fn the_cutoff_coefficient_stays_inside_the_stable_range() {
-        let synth = O3Synth::default();
+    fn a_note_on_produces_audio() {
+        let mut synth = sounding_synth();
+        synth.note_on(69, 1.0);
+
+        let output = render(&mut synth, 4_800);
+        let peak = output.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
+
+        assert!(peak > 0.05, "a note on produced silence, peak {peak}");
+        assert!(rms(&output) > 0.02, "rms {} from a note on", rms(&output));
+    }
+
+    #[test]
+    fn a_note_off_silences_the_synth() {
+        let mut synth = sounding_synth();
+        synth.note_on(69, 1.0);
+        render(&mut synth, 4_800);
+
+        synth.envelope.gate_off();
+        render(&mut synth, SAMPLE_RATE as usize);
+        let tail = render(&mut synth, 4_800);
+
+        assert!(rms(&tail) < 0.01, "release left rms {}", rms(&tail));
+    }
+
+    #[test]
+    fn pitch_comes_from_the_note_and_never_from_the_velocity() {
+        // Velocity used to be multiplied into the oscillator frequency, so a quiet note played
+        // flat. Both velocities must give the same pitch.
+        let mut quiet = sounding_synth();
+        quiet.note_on(69, 0.2);
+        let mut loud = sounding_synth();
+        loud.note_on(69, 1.0);
+
+        let quiet_output = render(&mut quiet, 24_000);
+        let loud_output = render(&mut loud, 24_000);
+
+        let quiet_pitch = frequency(&quiet_output, SAMPLE_RATE);
+        let loud_pitch = frequency(&loud_output, SAMPLE_RATE);
+
+        assert!(
+            (quiet_pitch - loud_pitch).abs() < 1.0,
+            "velocity changed the pitch: {} Hz at 0.2 vs {} Hz at 1.0",
+            quiet_pitch,
+            loud_pitch
+        );
+        assert!(
+            (quiet_pitch - 440.0).abs() < 5.0,
+            "note 69 should be 440 Hz, measured {quiet_pitch}"
+        );
+    }
+
+    #[test]
+    fn velocity_scales_the_level() {
+        let mut quiet = sounding_synth();
+        quiet.note_on(69, 0.25);
+        let mut loud = sounding_synth();
+        loud.note_on(69, 1.0);
+
+        let quiet_rms = rms(&render(&mut quiet, 4_800));
+        let loud_rms = rms(&render(&mut loud, 4_800));
+
+        assert!(
+            loud_rms > quiet_rms * 2.0,
+            "velocity 1.0 ({loud_rms}) should be far louder than 0.25 ({quiet_rms})"
+        );
+    }
+
+    #[test]
+    fn cutoff_is_a_fraction_of_the_sample_rate() {
+        // `OnePoleFilter::set_lowpass` takes f/fs, not a pre-computed coefficient. The double
+        // conversion that shipped first turned 2 kHz into ~11 kHz.
+        let synth = sounding_synth();
+        let default_cutoff = synth.normalised_cutoff(SAMPLE_RATE);
+
+        assert!(
+            (default_cutoff - 2_000.0 / SAMPLE_RATE).abs() < 1e-6,
+            "2 kHz at 48 kHz should be {} , got {default_cutoff}",
+            2_000.0 / SAMPLE_RATE
+        );
+    }
+
+    #[test]
+    fn cutoff_never_leaves_the_stable_range() {
         for cutoff in [20.0, 440.0, 2_000.0, 20_000.0, 96_000.0] {
-            let synth = O3Synth {
-                params: {
-                    let mut params = O3SynthParams::default();
-                    params.cutoff = FloatParam::new(
-                        "Cutoff",
-                        cutoff,
-                        FloatRange::Linear {
-                            min: 20.0,
-                            max: 96_000.0,
-                        },
-                    );
-                    Arc::new(params)
-                },
-                ..synth
-            };
-            let coefficient = synth.cutoff_coefficient(48_000.0);
+            let mut synth = sounding_synth();
+            synth.params = Arc::new(O3SynthParams {
+                cutoff: FloatParam::new(
+                    "Cutoff",
+                    cutoff,
+                    FloatRange::Linear { min: 20.0, max: 96_000.0 },
+                ),
+                ..O3SynthParams::default()
+            });
+            synth.apply_parameters();
+
+            let normalised = synth.normalised_cutoff(SAMPLE_RATE);
             assert!(
-                (0.0..=1.0).contains(&coefficient),
-                "cutoff {cutoff} produced {coefficient}"
+                (0.0..=0.5).contains(&normalised),
+                "cutoff {cutoff} produced {normalised}"
             );
         }
+    }
+
+    #[test]
+    fn a_higher_cutoff_passes_more_high_end() {
+        // Behavioural counterpart to the mapping test: if the cutoff is mis-scaled the two
+        // settings stop being distinguishable at the top end.
+        let brightness = |cutoff: f32| {
+            let mut synth = sounding_synth();
+            synth.note_on(81, 1.0); // 880 Hz
+            synth.params = Arc::new(O3SynthParams {
+                cutoff: FloatParam::new(
+                    "Cutoff",
+                    cutoff,
+                    FloatRange::Linear { min: 20.0, max: 20_000.0 },
+                ),
+                ..O3SynthParams::default()
+            });
+            synth.apply_parameters();
+
+            let output = render(&mut synth, 24_000);
+            // Slope energy relative to signal energy: a shape measure, so the filter's level
+            // change cannot hide the difference.
+            let slope: f32 = output.windows(2).map(|pair| (pair[1] - pair[0]).powi(2)).sum();
+            let energy: f32 = output.iter().map(|sample| sample * sample).sum();
+            (slope / energy).sqrt()
+        };
+
+        let dark = brightness(300.0);
+        let bright = brightness(12_000.0);
+        assert!(bright > dark * 2.0, "cutoff 12 kHz ({bright}) should be brighter than 300 Hz ({dark})");
+    }
+
+    #[test]
+    fn rebuilding_for_a_new_sample_rate_keeps_the_parameter_block() {
+        // `initialize()` used to do `*self = Self::with_sample_rate(..)`, which swapped in a fresh
+        // `Arc<Params>`; the host and the editor kept pointing at the old one, so automation and
+        // the GUI wrote to a parameter block the audio path never read.
+        let mut synth = O3Synth::default();
+        let before = synth.params.clone();
+
+        synth.prepare(96_000.0);
+
+        assert!(
+            Arc::ptr_eq(&before, &synth.params),
+            "prepare() replaced the parameter block"
+        );
+        assert_eq!(synth.sample_rate, 96_000.0);
+    }
+
+    #[test]
+    fn the_editor_builds_a_window_state() {
+        // Guards the cut-off-control failure: a plugin with no editor opens nothing, and the
+        // window size has to leave room for every control.
+        let synth = O3Synth::default();
+        let size = synth.params.editor_state.size();
+        assert!(size.0 >= 300 && size.1 >= 360, "editor window is too small: {size:?}");
     }
 }
