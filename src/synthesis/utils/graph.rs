@@ -40,20 +40,18 @@ impl GraphNode {
             GraphNode::Constant(val) => *val,
             GraphNode::Input => graph_input,
             GraphNode::Oscillator { module, wave_type, noise_type } => {
-                // If it's an FM operator or Phase Distortion, it might use inputs[0] as phase/PM.
-                let pm = inputs.get(0).copied().unwrap_or(0.0);
+                // The dispatch enum already knows how to run every variant - it is what the
+                // `Additive` arm was missing here for. FM and phase distortion are the only ones
+                // that take the input as phase modulation, which the enum cannot express, so they
+                // are the only variants named here; a new variant needs no edit in this file.
                 match module {
-                    OscillatorModule::Fm(osc) => osc.next_sample(pm),
-                    OscillatorModule::PhaseDistortion(osc) => osc.process_sample(pm),
-                    OscillatorModule::PolyBlep(osc) => osc.next_sample(*wave_type),
-                    OscillatorModule::Noise(osc) => osc.next_sample(*noise_type),
-                    OscillatorModule::Wavetable(osc) => osc.process_sample(),
-                    OscillatorModule::KarplusStrong(osc) => osc.next_sample(),
-                    OscillatorModule::Supersaw(osc) => osc.next_sample(),
-                    OscillatorModule::Granular(osc) => osc.process_sample(0.0),
-                    OscillatorModule::Vector(osc) => osc.process_sample(0.0),
-                    OscillatorModule::PhysicalModeling(osc) => osc.process_sample(0.0),
-                    OscillatorModule::Additive(osc) => osc.next_sample(),
+                    OscillatorModule::Fm(osc) => {
+                        osc.next_sample(inputs.get(0).copied().unwrap_or(0.0))
+                    }
+                    OscillatorModule::PhaseDistortion(osc) => {
+                        osc.process_sample(inputs.get(0).copied().unwrap_or(0.0))
+                    }
+                    other => other.next_sample(*wave_type, *noise_type),
                 }
             }
             GraphNode::Filter(module) => {
