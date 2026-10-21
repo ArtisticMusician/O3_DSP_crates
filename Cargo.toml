@@ -5,20 +5,15 @@ edition = "2021"
 
 [lib]
 name = "o3dsp"
-crate-type = ["cdylib", "lib"]
+crate-type = ["lib"]
 
 [dependencies]
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", branch = "master" }
-nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug.git", branch = "master" }
 atomic_float = "1.0"
 rand = { version = "0.8", features = ["small_rng"] }
 
 [features]
 default = []
-nih_plug_support = []
 dasp_support = ["dep:dasp"]
-# Writes plugin activity to D:/O3DSP_diag.log. Diagnostic only; off by default.
-diag = []
 
 [dependencies.dasp]
 version = "0.11"
