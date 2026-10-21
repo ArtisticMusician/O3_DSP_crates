@@ -134,7 +134,7 @@ fn audio_graph_allocates_nothing_while_processing() {
     let input = graph.add_node(GraphNode::Input);
     let mut lowpass = OnePoleFilter::new();
     lowpass.set_lowpass(0.1);
-    let filter = graph.add_node(GraphNode::Filter(FilterModule::OnePole(lowpass)));
+    let filter = graph.add_node(GraphNode::filter(FilterModule::OnePole(lowpass)));
     let gain = graph.add_node(GraphNode::Constant(0.5));
     let mix = graph.add_node(GraphNode::Math(MathOp::Multiply));
 

@@ -2,6 +2,7 @@ use crate::synthesis::utils::Processor;
 
 /// Saturation and waveshaping effect.
 /// Adds harmonic distortion by applying a non-linear transfer function.
+#[derive(Debug, Clone)]
 pub struct Saturation {
     drive: f32, // Input gain (linear multiplier)
     mix: f32,   // Wet/dry mix (0.0 to 1.0)

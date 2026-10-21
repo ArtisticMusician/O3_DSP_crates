@@ -3,6 +3,7 @@ use crate::synthesis::utils::{ParameterSmoother, Processor};
 
 /// A simple Mono delay line using a circular buffer.
 /// Supports fractional delay via Hermite interpolation.
+#[derive(Debug, Clone)]
 pub struct MonoFeedbackDelay {
     buffer: Vec<f32>,
     write_index: usize,
