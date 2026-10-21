@@ -287,3 +287,72 @@ mod tests {
         assert!(last_val > 0.0 && last_val < 1.0, "Filter should be smoothing the step to 1.0. Got: {}", last_val);
     }
 }
+
+#[cfg(test)]
+mod playback_tests {
+    use super::*;
+    use crate::synthesis::oscillators::polyblep::{TableOscillator, Waveform};
+    use crate::synthesis::oscillators::noise::NoiseType;
+
+    const SAMPLE_RATE: f32 = 48_000.0;
+
+    fn oscillator_node(frequency: f32, waveform: Waveform) -> GraphNode {
+        let mut table = TableOscillator::new(SAMPLE_RATE);
+        table.set_frequency(frequency);
+        GraphNode::Oscillator {
+            module: OscillatorModule::PolyBlep(table),
+            wave_type: waveform,
+            noise_type: NoiseType::White,
+        }
+    }
+
+    fn frequency_of(buffer: &[f32]) -> f32 {
+        let crossings = buffer
+            .windows(2)
+            .filter(|pair| pair[0] <= 0.0 && pair[1] > 0.0)
+            .count();
+        crossings as f32 * SAMPLE_RATE / buffer.len() as f32
+    }
+
+    #[test]
+    fn an_oscillator_node_plays_at_its_frequency() {
+        let mut graph = AudioGraph::new();
+        let oscillator = graph.add_node(oscillator_node(440.0, Waveform::Sine));
+        graph.set_output_node(oscillator);
+        graph.compile();
+
+        let output: Vec<f32> = (0..24_000).map(|_| graph.process_sample(0.0)).collect();
+        let measured = frequency_of(&output);
+
+        assert!((measured - 440.0).abs() < 5.0, "measured {measured} Hz");
+    }
+
+    #[test]
+    fn two_sources_summed_into_one_input_are_both_heard() {
+        // Each constant is 1.0; the add sums its two slots, so the graph output is 2.0.
+        let mut graph = AudioGraph::new();
+        let left = graph.add_node(GraphNode::Constant(1.0));
+        let right = graph.add_node(GraphNode::Constant(1.0));
+        let sum = graph.add_node(GraphNode::Math(MathOp::Add));
+        graph.connect(left, sum, 0);
+        graph.connect(right, sum, 1);
+        graph.set_output_node(sum);
+        graph.compile();
+
+        assert_eq!(graph.process_sample(0.0), 2.0);
+    }
+
+    #[test]
+    fn a_gain_node_scales_its_input() {
+        let mut graph = AudioGraph::new();
+        let signal = graph.add_node(GraphNode::Input);
+        let gain = graph.add_node(GraphNode::Constant(0.25));
+        let product = graph.add_node(GraphNode::Math(MathOp::Multiply));
+        graph.connect(signal, product, 0);
+        graph.connect(gain, product, 1);
+        graph.set_output_node(product);
+        graph.compile();
+
+        assert!((graph.process_sample(0.8) - 0.2).abs() < 1e-6);
+    }
+}
