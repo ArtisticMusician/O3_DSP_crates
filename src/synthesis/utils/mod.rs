@@ -10,3 +10,4 @@ pub use parameter_smoother::ParameterSmoother;
 pub use resampler::HermiteResampler;
 pub use rand_utils::{random_f32, random_f32_range, random_i32, random_range, random_sign};
 pub use bezier::Bezier;
+pub mod graph;

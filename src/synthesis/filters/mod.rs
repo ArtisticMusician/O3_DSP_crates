@@ -40,6 +40,7 @@ use crate::synthesis::utils::Processor;
 
 /// One active topology. For N combs / N allpasses use `CombBank` / `AllpassBank`
 /// (or `SchroederReverb`), not this enum.
+#[derive(Debug, Clone)]
 pub enum FilterModule {
     OnePole(OnePoleFilter),
     Ladder(LadderFilterProcessor),

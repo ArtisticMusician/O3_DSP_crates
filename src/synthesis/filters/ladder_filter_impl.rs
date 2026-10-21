@@ -2,6 +2,7 @@
 use crate::synthesis::filters::ladder_filter::LadderFilter;
 use crate::synthesis::utils::Processor;
 
+#[derive(Debug, Clone)]
 pub struct LadderFilterProcessor(pub LadderFilter);
 
 impl Processor for LadderFilterProcessor {
